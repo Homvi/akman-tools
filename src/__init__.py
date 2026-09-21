@@ -1,0 +1,1 @@
+"""Cable installation analysis helpers."""

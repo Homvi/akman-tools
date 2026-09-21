@@ -1,0 +1,14 @@
+.venv/
+venv/
+.env
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+*.pyo
+.streamlit/secrets.toml
+.idea/
+.vscode/
+*.xlsx
+~$*.xlsx
+data/
