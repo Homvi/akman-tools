@@ -91,3 +91,68 @@ def clear_dataset() -> None:
     if DB_PATH.exists():
         with _connect() as conn:
             conn.execute("DELETE FROM dataset")
+
+
+def _ensure_workforce_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workforce (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            frame BLOB NOT NULL,
+            file_name TEXT,
+            signature TEXT,
+            year INTEGER,
+            saved_at TEXT
+        )
+        """
+    )
+
+
+def save_workforce(*, frame, file_name: str, signature: str, year: int) -> None:
+    payload = (
+        pickle.dumps(frame, protocol=pickle.HIGHEST_PROTOCOL),
+        file_name,
+        signature,
+        int(year),
+        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+    with _connect() as conn:
+        _ensure_workforce_table(conn)
+        conn.execute("DELETE FROM workforce")
+        conn.execute(
+            """
+            INSERT INTO workforce (id, frame, file_name, signature, year, saved_at)
+            VALUES (1, ?, ?, ?, ?, ?)
+            """,
+            payload,
+        )
+
+
+def load_workforce() -> dict | None:
+    if not DB_PATH.exists():
+        return None
+    with _connect() as conn:
+        _ensure_workforce_table(conn)
+        row = conn.execute(
+            """
+            SELECT frame, file_name, signature, year, saved_at
+            FROM workforce WHERE id = 1
+            """
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "frame": pickle.loads(row[0]),
+        "file_name": row[1],
+        "signature": row[2],
+        "year": row[3],
+        "saved_at": row[4],
+    }
+
+
+def clear_workforce() -> None:
+    if not DB_PATH.exists():
+        return
+    with _connect() as conn:
+        _ensure_workforce_table(conn)
+        conn.execute("DELETE FROM workforce")

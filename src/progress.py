@@ -4,8 +4,8 @@ from datetime import date
 
 import pandas as pd
 
-KIND_PARTIAL = "Részleges"
-KIND_COMPLETE = "Teljes"
+KIND_PARTIAL = "Partial"
+KIND_COMPLETE = "Complete"
 KIND_OPTIONS = (KIND_PARTIAL, KIND_COMPLETE)
 _EVENT_MIN = pd.Timestamp("1990-01-01")
 _EVENT_MAX = pd.Timestamp("2100-12-31")
@@ -142,6 +142,26 @@ def weekly_progress(daily: pd.DataFrame) -> pd.DataFrame:
     )
     grouped["Cumulative"] = grouped["Total"].cumsum()
     return grouped
+
+
+def weekly_hours(daily_hrs: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate daily work hours into ISO weeks (same KW labels as weekly_progress)."""
+    empty = pd.DataFrame(columns=["Year", "Week", "KW", "Hours"])
+    if daily_hrs is None or daily_hrs.empty or "Date" not in daily_hrs.columns:
+        return empty
+    out = daily_hrs.copy()
+    out["Date"] = pd.to_datetime(out["Date"])
+    out["Hours"] = pd.to_numeric(out.get("Hours"), errors="coerce").fillna(0.0)
+    iso = out["Date"].dt.isocalendar()
+    out["Year"] = iso.year.astype(int)
+    out["Week"] = iso.week.astype(int)
+    out["KW"] = ["KW" + f"{int(week):02d} {int(year)}" for year, week in zip(out["Year"], out["Week"])]
+    return (
+        out.groupby(["Year", "Week", "KW"], as_index=False)["Hours"]
+        .sum()
+        .sort_values(["Year", "Week"])
+        .reset_index(drop=True)
+    )
 
 
 def progress_stats(events: pd.DataFrame, daily: pd.DataFrame) -> dict:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from io import BytesIO
 
 import pandas as pd
@@ -23,10 +23,18 @@ def test_normalize_and_join_keys():
     assert join_key("5012.1") == join_key("5012,1") == "5012,1"
     assert join_key("05012.1") == "5012,1"
 
-    from src.ids import parse_cable_id_list, select_cables_by_ids
+    from src.ids import cable_id_list_stats, parse_cable_id_list, select_cables_by_ids
 
     assert parse_cable_id_list("5012.1; 0006; 5012,1") == ["5012,1", "6"]
     assert parse_cable_id_list("5012.1\n0006") == ["5012,1", "6"]
+    assert parse_cable_id_list("5012.1; 0006; 5012,1", dedupe=False) == ["5012,1", "6", "5012,1"]
+
+    stats = cable_id_list_stats("5012.1; 0006; 5012,1; 0006")
+    assert stats["raw_count"] == 4
+    assert stats["unique_count"] == 2
+    assert stats["duplicate_count"] == 2
+    assert stats["unique"] == ["5012,1", "6"]
+    assert set(stats["duplicates"]) == {"5012,1", "6"}
 
     sample = pd.DataFrame(
         {
@@ -251,7 +259,7 @@ def test_parse_join_filters_and_stops():
     assert round(stats["avg_m_per_day"], 2) == round((91.2 + 31) / stats["days"], 2)
     only_partial = daily_progress(events, [KIND_PARTIAL])
     assert only_partial["Total"].sum() == 91.2
-    from src.progress import weekly_progress
+    from src.progress import weekly_hours, weekly_progress
 
     weekly = weekly_progress(daily)
     assert round(float(weekly["Total"].sum()), 1) == round(91.2 + 31, 1)
@@ -259,6 +267,17 @@ def test_parse_join_filters_and_stops():
     week_36 = weekly.loc[weekly["KW"].eq("KW36 2026")]
     assert not week_36.empty
     assert round(float(week_36["Total"].iloc[0]), 1) == 91.2
+
+    hrs = weekly_hours(
+        pd.DataFrame(
+            {
+                "Date": pd.to_datetime(["2026-08-31", "2026-09-01", "2026-09-07"]),
+                "Hours": [10.0, 20.0, 5.0],
+            }
+        )
+    )
+    assert round(float(hrs.loc[hrs["KW"].eq("KW36 2026"), "Hours"].iloc[0]), 1) == 30.0
+    assert round(float(hrs.loc[hrs["KW"].eq("KW37 2026"), "Hours"].iloc[0]), 1) == 5.0
 
     loc_cables = cables_at_location(joined, stops, "3EDH407")
     assert list(loc_cables["join_key"]) == ["2"]
@@ -592,7 +611,7 @@ def test_stuetzen_bahn_filter():
 
 
 def test_stutzen_filter_and_or():
-    from src.stutzen_filter import filter_by_nodes, parse_search_nodes, stutzen_filename
+    from src.stutzen_filter import filter_by_nodes, parse_search_nodes, search_nodes_stats, stutzen_filename
 
     df = pd.DataFrame(
         {
@@ -614,6 +633,13 @@ def test_stutzen_filter_and_or():
     assert list(dotted["Kabelnr"]) == ["1"]
     assert stutzen_filename(nodes) == "stutzen_1EDV606_1E2104.xlsx"
 
+    unique_nodes = parse_search_nodes("1EDV606; 1E2104; 1EDV606", unique_only=True)
+    assert unique_nodes == ["1EDV606", "1E2104"]
+    stats = search_nodes_stats("1EDV606; 1E2104; 1EDV606; 1e2104")
+    assert stats["raw_count"] == 4
+    assert stats["unique_count"] == 2
+    assert stats["duplicate_count"] == 2
+
 
 def test_partial_length_calculator():
     from src.length_calc import calculate_pulled_length, format_meters
@@ -629,3 +655,116 @@ def test_partial_length_calculator():
     assert not missing.ok
     empty = calculate_pulled_length("", "", 0, "", 0, "", "")
     assert not empty.ok
+
+
+def test_workforce_headcount_and_positions():
+    from openpyxl import Workbook
+
+    from src.workforce import (
+        daily_headcount,
+        daily_hours,
+        headcount_growth,
+        is_present,
+        latest_headcount_day,
+        meters_per_hour,
+        meters_per_person,
+        parse_workforce_excel,
+        people_present_on,
+        unique_positions,
+    )
+
+    assert is_present(10)
+    assert is_present("9,5")
+    assert not is_present("H")
+    assert not is_present(0)
+    assert not is_present(None)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Szeptember"
+    ws.append([None, None, None])
+    ws.append([None, "Name", "position", 1, 2, 3])
+    ws.append([None, "Alice", "Cable puller", 10, "H", 10])
+    ws.append([None, "Bob", "Electrician", 10, 10, 0])
+    ws.append([None, "Sum", "Cable puller", 20, 10, 10])
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    df = parse_workforce_excel(buf, year=2026)
+    assert set(df["Name"]) == {"Alice", "Bob"}
+    assert unique_positions(df) == ["Cable puller", "Electrician"]
+
+    daily = daily_headcount(df)
+    day1 = daily.loc[daily["Date"].eq(pd.Timestamp("2026-09-01"))].iloc[0]
+    assert int(day1["Total"]) == 2
+    assert int(day1["Cable puller"]) == 1
+    assert int(day1["Electrician"]) == 1
+
+    day2 = daily.loc[daily["Date"].eq(pd.Timestamp("2026-09-02"))].iloc[0]
+    assert int(day2["Total"]) == 1  # Alice H, Bob present
+    assert int(day2["Cable puller"]) == 0
+
+    hours = daily_hours(df)
+    assert float(hours.loc[hours["Date"].eq("2026-09-01"), "Hours"].iloc[0]) == 20.0
+    assert float(hours.loc[hours["Date"].eq("2026-09-02"), "Hours"].iloc[0]) == 10.0
+    assert float(hours.loc[hours["Date"].eq("2026-09-03"), "Hours"].iloc[0]) == 10.0
+    assert int(hours.loc[hours["Date"].eq("2026-09-01"), "Headcount"].iloc[0]) == 2
+
+    # Trailing empty days are trimmed; weekends can be dropped
+    wb2 = Workbook()
+    ws2 = wb2.active
+    ws2.title = "Szeptember"
+    ws2.append([None, None, None])
+    # 2026-09-04 Friday, 05 Sat, 06 Sun, 07 Mon with people, then empty days in sheet to 10
+    ws2.append([None, "Name", "position", 4, 5, 6, 7, 8, 9, 10])
+    ws2.append([None, "Alice", "Cable puller", 10, 10, "H", 10, None, None, None])
+    buf2 = BytesIO()
+    wb2.save(buf2)
+    buf2.seek(0)
+    df2 = parse_workforce_excel(buf2, year=2026)
+    full = daily_headcount(df2, exclude_weekends=False, trim_empty_tail=True, only_days_with_people=True)
+    assert pd.Timestamp(full["Date"].max()) == pd.Timestamp("2026-09-07")
+    assert int(full.loc[full["Date"].eq("2026-09-07"), "Total"].iloc[0]) == 1
+    assert (full["Total"] > 0).all()
+    # Sep 6 is Sunday with H only → not present → dropped
+    assert pd.Timestamp("2026-09-06") not in set(pd.to_datetime(full["Date"]))
+    no_we = daily_headcount(df2, exclude_weekends=True, trim_empty_tail=True, only_days_with_people=True)
+    assert all(pd.to_datetime(no_we["Date"]).dt.dayofweek < 5)
+    assert pd.Timestamp("2026-09-05") not in set(pd.to_datetime(no_we["Date"]))
+    assert (no_we["Total"] > 0).all()
+
+    only_pull = daily_headcount(df, ["Cable puller"])
+    assert int(only_pull.loc[only_pull["Date"].eq(pd.Timestamp("2026-09-01")), "Total"].iloc[0]) == 1
+
+    when, count = latest_headcount_day(daily, as_of=date(2026, 9, 3))
+    assert when == pd.Timestamp("2026-09-03")
+    assert count == 1  # Alice 10, Bob 0
+
+    people = people_present_on(df, date(2026, 9, 1))
+    assert list(people["Name"]) == ["Alice", "Bob"]
+
+    growth = headcount_growth(daily)
+    assert growth["start"] == 2
+    assert growth["end"] == 1
+    assert growth["peak"] == 2
+
+    meters = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(["2026-09-01", "2026-09-02", "2026-09-03"]),
+            "Total": [20.0, 10.0, 5.0],
+        }
+    )
+    prod = meters_per_person(daily, meters)
+    assert round(float(prod.loc[prod["Date"].eq("2026-09-01"), "M_per_person"].iloc[0]), 1) == 10.0
+    assert round(float(prod.loc[prod["Date"].eq("2026-09-02"), "M_per_person"].iloc[0]), 1) == 10.0
+    assert float(prod.loc[prod["Date"].eq("2026-09-03"), "M_per_person"].iloc[0]) == 5.0
+
+    per_h = meters_per_hour(hours, meters)
+    assert round(float(per_h.loc[per_h["Date"].eq("2026-09-01"), "M_per_hour"].iloc[0]), 2) == 1.0
+    assert round(float(per_h.loc[per_h["Date"].eq("2026-09-02"), "M_per_hour"].iloc[0]), 2) == 1.0
+    assert round(float(per_h.loc[per_h["Date"].eq("2026-09-03"), "M_per_hour"].iloc[0]), 2) == 0.5
+    assert float(per_h.loc[per_h["Date"].eq("2026-09-01"), "Hours"].iloc[0]) == 20.0
+    assert float(per_h.loc[per_h["Date"].eq("2026-09-01"), "Meters"].iloc[0]) == 20.0
+
+

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+from datetime import date, datetime
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -13,7 +14,8 @@ from src.export import to_xlsx_bytes
 from src.join import join_cable_data, unmatched_ids
 from src.parsers import parse_catra_list, parse_status_list
 from src.runtime import cached_export_xlsx, clear_runtime_caches, filter_options, get_filtered
-from src.store import clear_dataset, load_dataset, save_dataset
+from src.store import clear_dataset, clear_workforce, load_dataset, load_workforce, save_dataset, save_workforce
+from src.workforce import parse_workforce_excel
 
 FILTER_KEYS = (
     "filter_devices",
@@ -130,16 +132,66 @@ def _show_load_status() -> None:
         st.sidebar.caption(f"{len(only_catra)} CaTra IDs without status match.")
 
 
+def _workforce_signature(upload) -> str:
+    return hashlib.sha256(upload.getvalue()).hexdigest()
+
+
+def _apply_workforce(data: dict) -> None:
+    st.session_state["workforce"] = data["frame"]
+    st.session_state["workforce_name"] = data["file_name"]
+    st.session_state["workforce_signature"] = data["signature"]
+    st.session_state["workforce_year"] = data["year"]
+    st.session_state["workforce_saved_at"] = data.get("saved_at")
+
+
+def _clear_workforce_state() -> None:
+    for key in ("workforce", "workforce_name", "workforce_signature", "workforce_year", "workforce_saved_at"):
+        st.session_state.pop(key, None)
+    clear_workforce()
+
+
+def _show_workforce_status() -> None:
+    frame = st.session_state.get("workforce")
+    if frame is None or getattr(frame, "empty", True):
+        return
+    name = st.session_state.get("workforce_name") or "workforce.xlsx"
+    people = int(frame["Name"].nunique()) if "Name" in frame.columns else 0
+    st.sidebar.success(f"Workforce: {name} · {people} people")
+
+
 def render_uploads() -> None:
     if "joined" not in st.session_state:
         stored = load_dataset()
         if stored is not None:
             _apply_dataset(stored)
 
+    if "workforce" not in st.session_state or st.session_state.get("workforce") is None:
+        wf_stored = load_workforce()
+        if wf_stored is not None:
+            _apply_workforce(wf_stored)
+
     st.sidebar.header("Data files")
-    st.sidebar.caption("Egyszer töltsd fel mindkét Excel-t. Az adat minden oldalon megmarad.")
+    st.sidebar.caption(
+        "Upload Progressliste + CaTra once (required). "
+        "Workforce hours Excel is optional — used on Workforce and weekly Progress."
+    )
     status_file = st.sidebar.file_uploader("Status list (Progressliste)", type=["xlsx"], key="status_file")
     catra_file = st.sidebar.file_uploader("CaTra cable list", type=["xlsx"], key="catra_file")
+    wf_year = st.sidebar.number_input(
+        "Workforce year",
+        min_value=2020,
+        max_value=2100,
+        value=int(st.session_state.get("workforce_year") or date.today().year),
+        step=1,
+        key="workforce_year_input",
+        help="Calendar year for day columns in the workforce Excel.",
+    )
+    workforce_file = st.sidebar.file_uploader(
+        "Workforce hours (optional)",
+        type=["xlsx"],
+        key="workforce_file",
+        help="Name / position / daily hours sheets. H = holiday.",
+    )
 
     if status_file and catra_file:
         signature = _upload_signature(status_file, catra_file)
@@ -182,10 +234,49 @@ def render_uploads() -> None:
             _apply_dataset(stored)
             _show_load_status()
 
+    if workforce_file is not None:
+        wf_sig = _workforce_signature(workforce_file)
+        already_wf = (
+            st.session_state.get("workforce_signature") == wf_sig
+            and st.session_state.get("workforce") is not None
+        )
+        if not already_wf:
+            try:
+                workforce_file.seek(0)
+                frame = parse_workforce_excel(workforce_file, year=int(wf_year))
+            except Exception as exc:
+                st.sidebar.error(f"Could not parse workforce file: {exc}")
+                frame = None
+            if frame is not None:
+                saved_at = datetime.now().isoformat(timespec="seconds")
+                try:
+                    save_workforce(
+                        frame=frame,
+                        file_name=workforce_file.name,
+                        signature=wf_sig,
+                        year=int(wf_year),
+                    )
+                except Exception as exc:
+                    st.sidebar.warning(f"Could not save workforce locally: {exc}")
+                _apply_workforce(
+                    {
+                        "frame": frame,
+                        "file_name": workforce_file.name,
+                        "signature": wf_sig,
+                        "year": int(wf_year),
+                        "saved_at": saved_at,
+                    }
+                )
+    _show_workforce_status()
+
     if st.session_state.get("joined") is not None:
-        if st.sidebar.button("Clear uploaded data", use_container_width=True):
+        if st.sidebar.button("Clear cable data", use_container_width=True):
             _clear_loaded_data()
             clear_dataset()
+            st.rerun()
+    if st.session_state.get("workforce") is not None:
+        if st.sidebar.button("Clear workforce data", use_container_width=True):
+            _clear_workforce_state()
             st.rerun()
 
 
