@@ -13,10 +13,54 @@ MODE_LABELS = {MODE_AND: "MIND (AND)", MODE_OR: "BÁRMELYIK (OR)"}
 
 _PAREN = re.compile(r"\s*\([^)]*\)")
 _SAFE_FILE = re.compile(r"[^a-zA-Z0-9._-]")
+_SPLIT_NODES = re.compile(r"[;,\n]+")
 
 
-def parse_search_nodes(text) -> list[str]:
-    return [part.strip() for part in str(text or "").split(",") if part.strip()]
+def parse_search_nodes(text, *, unique_only: bool = False) -> list[str]:
+    """
+    Parse Stütze / Bahn numbers separated by semicolon, comma, or newline.
+    When unique_only=True, keep first occurrence of each token.
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return []
+    nodes: list[str] = []
+    seen: set[str] = set()
+    for part in _SPLIT_NODES.split(raw):
+        token = part.strip()
+        if not token:
+            continue
+        if unique_only:
+            key = token.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+        nodes.append(token)
+    return nodes
+
+
+def search_nodes_stats(text) -> dict:
+    raw = parse_search_nodes(text, unique_only=False)
+    unique = parse_search_nodes(text, unique_only=True)
+    counts: dict[str, int] = {}
+    for token in raw:
+        key = token.casefold()
+        counts[key] = counts.get(key, 0) + 1
+    duplicates = []
+    seen_dup: set[str] = set()
+    for token in raw:
+        key = token.casefold()
+        if counts.get(key, 0) > 1 and key not in seen_dup:
+            duplicates.append(token)
+            seen_dup.add(key)
+    return {
+        "raw": raw,
+        "unique": unique,
+        "raw_count": len(raw),
+        "unique_count": len(unique),
+        "duplicate_count": len(raw) - len(unique),
+        "duplicates": duplicates,
+    }
 
 
 def route_node_set(pfad) -> set[str]:

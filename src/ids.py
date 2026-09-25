@@ -42,10 +42,11 @@ def _strip_zeros(token: str) -> str:
     return stripped or "0"
 
 
-def parse_cable_id_list(text) -> list[str]:
+def parse_cable_id_list(text, *, dedupe: bool = True) -> list[str]:
     """
-    Parse semicolon / newline separated cable IDs.
-    Keeps input order; 5012.1 and 5012,1 become the same join_key (first wins).
+    Parse semicolon / newline / comma-separated cable IDs.
+    Keeps input order; 5012.1 and 5012,1 become the same join_key.
+    When dedupe=True (default), first occurrence wins.
     """
     raw = str(text or "").strip()
     if not raw:
@@ -57,19 +58,46 @@ def parse_cable_id_list(text) -> list[str]:
         if not token:
             continue
         key = join_key(token)
-        if not key or key in seen:
+        if not key:
             continue
-        seen.add(key)
+        if dedupe:
+            if key in seen:
+                continue
+            seen.add(key)
         keys.append(key)
     return keys
 
 
-def select_cables_by_ids(df: pd.DataFrame, id_text) -> tuple[pd.DataFrame, list[str], list[str]]:
+def cable_id_list_stats(text) -> dict:
+    """Raw vs unique IDs and which keys were repeated in the paste."""
+    raw_keys = parse_cable_id_list(text, dedupe=False)
+    unique_keys = parse_cable_id_list(text, dedupe=True)
+    counts: dict[str, int] = {}
+    for key in raw_keys:
+        counts[key] = counts.get(key, 0) + 1
+    duplicates = [key for key, n in counts.items() if n > 1]
+    return {
+        "raw": raw_keys,
+        "unique": unique_keys,
+        "raw_count": len(raw_keys),
+        "unique_count": len(unique_keys),
+        "duplicate_count": len(raw_keys) - len(unique_keys),
+        "duplicates": duplicates,
+        "counts": counts,
+    }
+
+
+def select_cables_by_ids(
+    df: pd.DataFrame,
+    id_text,
+    *,
+    dedupe: bool = True,
+) -> tuple[pd.DataFrame, list[str], list[str]]:
     """
     Select cables whose join_key matches the pasted ID list.
     Returns (matched_rows in request order, found_keys, missing_keys).
     """
-    wanted = parse_cable_id_list(id_text)
+    wanted = parse_cable_id_list(id_text, dedupe=dedupe)
     if df is None or df.empty or not wanted:
         empty = df.iloc[0:0].copy() if df is not None else pd.DataFrame()
         return empty, [], wanted
@@ -83,11 +111,16 @@ def select_cables_by_ids(df: pd.DataFrame, id_text) -> tuple[pd.DataFrame, list[
     rows = []
     found: list[str] = []
     missing: list[str] = []
+    seen_found: set[str] = set()
     for key in wanted:
         row = by_key.get(key)
         if row is None:
-            missing.append(key)
+            if key not in missing:
+                missing.append(key)
             continue
+        if dedupe and key in seen_found:
+            continue
+        seen_found.add(key)
         found.append(key)
         rows.append(row)
     matched = pd.DataFrame(rows) if rows else df.iloc[0:0].copy()
