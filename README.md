@@ -1,12 +1,13 @@
 # Cable installation analysis
 
-Streamlit app for cable-pull planning and tracking on site. It joins a **Progressliste** (status) Excel with a **CaTra Kabelliste**, then filters, exports, and charts progress. An optional **workforce hours** Excel powers headcount and productivity views.
+Streamlit app for cable-pull planning and tracking on site. It joins a **Progressliste** (status) Excel with a **CaTra / Gesamtliste** (Kabelliste or Kabelziehliste), then filters, exports, and charts progress. An optional **workforce hours** Excel powers headcount and productivity views.
 
 ## Requirements
 
 - Python 3.10+
-- Progressliste + CaTra Kabelliste (`.xlsx`) for cable pages
+- Progressliste + CaTra / Gesamtliste (`.xlsx`) for cable pages
 - Workforce hours Excel (optional) for Workforce and weekly Progress hours
+- Areas / Helység Excel (optional) for the Areas page (trays + penetrations per room)
 
 ```bash
 pip install -r requirements.txt
@@ -20,7 +21,7 @@ streamlit run app.py
 
 Open [http://localhost:8501](http://localhost:8501).
 
-Uploads live in the sidebar under **Data files**. Cable data and workforce data are cached in a local SQLite DB under `data/` so you do not need to re-upload every session. Use **Clear cable data** / **Clear workforce data** to reset.
+Uploads live in the sidebar under **Data files**. Cable, workforce, and areas data are cached in a local SQLite DB under `data/` so you do not need to re-upload every session. Use the Clear buttons to reset.
 
 ## Pages
 
@@ -30,9 +31,11 @@ Uploads live in the sidebar under **Data files**. Cable data and workforce data 
 | **Stopped cables** | Cables with a stop date, grouped by Endsegment, remaining meters, exports |
 | **Stütze / Bahn szűrő** | Paste Stütze numbers (`;`), unique-only, AND/OR on pathway, CaTra / Kurzliste |
 | **Cable ID export** | Paste cable IDs (`;` or newlines); `5012.1` = `5012,1`; dedupe; combined export |
+| **Areas** | Helység rooms: thick/thin through/terminate/stops, pulled %, remaining m + Stütze hours → ETA workdays / KW; block tray/pen/area |
 | **Workforce** | Daily headcount by position, growth charts, date range, m/person and m/hour when cable data is loaded (`H` = holiday) |
 | **Nyomvonal-csoportok** | Pathway groups (~90% path match), exports |
 | **Progress** | Daily / weekly (KW) pulled meters; work hours on weekly chart when workforce is loaded |
+| **Hibák** | Progressliste ↔ Gesamtliste: IDs only on one side; length / A–E Gerät / Liste field conflicts |
 | **Hossz kalkulátor** | Partial pull length from pathway segments + A/E allowances; highlight overlap with already pulled path |
 | **Hogyan működik** | Short in-app guide with links to each page |
 

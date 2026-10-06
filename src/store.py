@@ -156,3 +156,100 @@ def clear_workforce() -> None:
     with _connect() as conn:
         _ensure_workforce_table(conn)
         conn.execute("DELETE FROM workforce")
+
+
+def _ensure_areas_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS areas_dataset (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            areas BLOB NOT NULL,
+            file_name TEXT,
+            signature TEXT,
+            saved_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS areas_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload BLOB NOT NULL,
+            saved_at TEXT
+        )
+        """
+    )
+
+
+def save_areas(*, areas, file_name: str, signature: str) -> None:
+    payload = (
+        pickle.dumps(areas, protocol=pickle.HIGHEST_PROTOCOL),
+        file_name,
+        signature,
+        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    )
+    with _connect() as conn:
+        _ensure_areas_table(conn)
+        conn.execute("DELETE FROM areas_dataset")
+        conn.execute(
+            """
+            INSERT INTO areas_dataset (id, areas, file_name, signature, saved_at)
+            VALUES (1, ?, ?, ?, ?)
+            """,
+            payload,
+        )
+
+
+def load_areas() -> dict | None:
+    if not DB_PATH.exists():
+        return None
+    with _connect() as conn:
+        _ensure_areas_table(conn)
+        row = conn.execute(
+            """
+            SELECT areas, file_name, signature, saved_at
+            FROM areas_dataset WHERE id = 1
+            """
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "areas": pickle.loads(row[0]),
+        "file_name": row[1],
+        "signature": row[2],
+        "saved_at": row[3],
+    }
+
+
+def clear_areas() -> None:
+    if not DB_PATH.exists():
+        return
+    with _connect() as conn:
+        _ensure_areas_table(conn)
+        conn.execute("DELETE FROM areas_dataset")
+
+
+def save_areas_settings(payload: dict) -> None:
+    blob = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+    saved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with _connect() as conn:
+        _ensure_areas_table(conn)
+        conn.execute("DELETE FROM areas_settings")
+        conn.execute(
+            """
+            INSERT INTO areas_settings (id, payload, saved_at)
+            VALUES (1, ?, ?)
+            """,
+            (blob, saved_at),
+        )
+
+
+def load_areas_settings() -> dict | None:
+    if not DB_PATH.exists():
+        return None
+    with _connect() as conn:
+        _ensure_areas_table(conn)
+        row = conn.execute("SELECT payload FROM areas_settings WHERE id = 1").fetchone()
+    if not row:
+        return None
+    return pickle.loads(row[0])

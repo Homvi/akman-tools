@@ -16,8 +16,8 @@ def render() -> None:
     st.caption("Röviden. A link a funkcióhoz visz.")
 
     st.markdown(
-        "**Data** in the sidebar: Progressliste + CaTra Kabelliste (required). "
-        "Workforce hours Excel is optional."
+        "**Data** in the sidebar: Progressliste + CaTra / Gesamtliste (Kabelziehliste) required. "
+        "Workforce hours Excel and Areas / Helység Excel are optional."
     )
     st.markdown("**Szűrők** (Gerät, vastagság, kategória, Stütze) minden oldalon ugyanazok.")
 
@@ -26,9 +26,11 @@ def render() -> None:
     _link("stopped", "Stopped cables — jelenlegi megállás, húzókártya / Kurzliste")
     _link("stutzen", "Stütze / Bahn szűrő — paste Stütze numbers (;), unique-only, AND/OR, CaTra/Kurzliste")
     _link("id_export", "Cable ID export — paste cable IDs (;), remove duplicates → CaTra / Kurzliste")
+    _link("areas", "Areas — room progress, thick/thin, remaining hours, KW ETA, blocking")
     _link("workforce", "Workforce — daily headcount / position filters, workforce Excel")
     _link("routes", "Nyomvonal-csoportok — 90% path-egyezés, húzókártya / Kurzliste")
     _link("progress", "Progress — napi és heti (KW) behúzott méter")
+    _link("errors", "Hibák — Progressliste ↔ Gesamtliste ID / mező eltérések")
     _link("calculator", "Hossz kalkulátor — részlegesen behúzott szakasz métere")
 
     st.subheader("Fogalmak")
@@ -42,7 +44,9 @@ def render() -> None:
 - **Kurzliste:** minden kábel egy sorban, nyomvonallal.
 - **Stütze / Bahn szűrő:** paste Stütze numbers with `;`; optional unique-only; AND/OR on pathway; CaTra / Kurzliste export.
 - **Cable ID export:** semicolon-separated cable IDs; remove duplicates; `5012.1` = `5012,1`; combined CaTra / Kurzliste.
+- **Areas:** Helység Excel trays/penetrations ∩ Pfad; remaining meters + Stütze hours → person-hours → workdays / KW; block tray/pen/area.
 - **Workforce:** workforce Excel; `H` = holiday; daily headcount by position.
+- **Hibák:** csak Progressliste / csak Gesamtliste ID-k; hossz, A/E Gerät, Liste ütközések.
 - **Hossz kalkulátor:** start–vég szakasz távolságai + A/E ráhagyás.
 """
     )

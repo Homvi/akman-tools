@@ -13,8 +13,20 @@ from src.analysis import cable_numbers
 from src.export import to_xlsx_bytes
 from src.join import join_cable_data, unmatched_ids
 from src.parsers import parse_catra_list, parse_status_list
+from src.reconcile import enrich_joined_for_reconcile, field_mismatches
 from src.runtime import cached_export_xlsx, clear_runtime_caches, filter_options, get_filtered
-from src.store import clear_dataset, clear_workforce, load_dataset, load_workforce, save_dataset, save_workforce
+from src.areas import parse_areas_excel
+from src.store import (
+    clear_areas,
+    clear_dataset,
+    clear_workforce,
+    load_areas,
+    load_dataset,
+    load_workforce,
+    save_areas,
+    save_dataset,
+    save_workforce,
+)
 from src.workforce import parse_workforce_excel
 
 FILTER_KEYS = (
@@ -84,6 +96,7 @@ def _clear_loaded_data() -> None:
         "joined",
         "only_status",
         "only_catra",
+        "field_conflicts",
         "catra_header",
         "data_signature",
         "stop_zip",
@@ -98,6 +111,10 @@ def _apply_dataset(data: dict, *, persist: bool = False) -> None:
     st.session_state["joined"] = data["joined"]
     st.session_state["only_status"] = data["only_status"]
     st.session_state["only_catra"] = data["only_catra"]
+    conflicts = data.get("field_conflicts")
+    if conflicts is None and data.get("joined") is not None:
+        conflicts = field_mismatches(data["joined"])
+    st.session_state["field_conflicts"] = conflicts
     st.session_state["catra_header"] = data["header"]
     st.session_state["data_signature"] = data["signature"]
     st.session_state["status_name"] = data["status_name"]
@@ -122,14 +139,17 @@ def _show_load_status() -> None:
     if joined is None:
         return
     status_name = st.session_state.get("status_name") or "Progressliste"
-    catra_name = st.session_state.get("catra_name") or "CaTra"
+    catra_name = st.session_state.get("catra_name") or "Gesamtliste"
     st.sidebar.success(f"{len(joined):,} cables — {status_name} + {catra_name}")
     only_status = st.session_state.get("only_status") or []
     only_catra = st.session_state.get("only_catra") or []
+    conflicts = st.session_state.get("field_conflicts")
     if only_status:
-        st.sidebar.caption(f"{len(only_status)} status IDs without CaTra match.")
+        st.sidebar.caption(f"{len(only_status)} Progressliste IDs without Gesamtliste match.")
     if only_catra:
-        st.sidebar.caption(f"{len(only_catra)} CaTra IDs without status match.")
+        st.sidebar.caption(f"{len(only_catra)} Gesamtliste IDs without Progressliste match.")
+    if conflicts is not None and not getattr(conflicts, "empty", True):
+        st.sidebar.caption(f"{len(conflicts)} field conflicts — see Hibák.")
 
 
 def _workforce_signature(upload) -> str:
@@ -159,6 +179,31 @@ def _show_workforce_status() -> None:
     st.sidebar.success(f"Workforce: {name} · {people} people")
 
 
+def _areas_signature(upload) -> str:
+    return hashlib.sha256(upload.getvalue()).hexdigest()
+
+
+def _apply_areas(data: dict) -> None:
+    st.session_state["areas"] = data["areas"]
+    st.session_state["areas_name"] = data["file_name"]
+    st.session_state["areas_signature"] = data["signature"]
+    st.session_state["areas_saved_at"] = data.get("saved_at")
+
+
+def _clear_areas_state() -> None:
+    for key in ("areas", "areas_name", "areas_signature", "areas_saved_at"):
+        st.session_state.pop(key, None)
+    clear_areas()
+
+
+def _show_areas_status() -> None:
+    areas = st.session_state.get("areas")
+    if not areas:
+        return
+    name = st.session_state.get("areas_name") or "areas.xlsx"
+    st.sidebar.success(f"Areas: {name} · {len(areas)} rooms")
+
+
 def render_uploads() -> None:
     if "joined" not in st.session_state:
         stored = load_dataset()
@@ -170,13 +215,24 @@ def render_uploads() -> None:
         if wf_stored is not None:
             _apply_workforce(wf_stored)
 
+    if "areas" not in st.session_state or st.session_state.get("areas") is None:
+        areas_stored = load_areas()
+        if areas_stored is not None:
+            _apply_areas(areas_stored)
+
     st.sidebar.header("Data files")
     st.sidebar.caption(
-        "Upload Progressliste + CaTra once (required). "
-        "Workforce hours Excel is optional — used on Workforce and weekly Progress."
+        "Upload Progressliste + CaTra / Gesamtliste once (required). "
+        "Workforce hours Excel is optional — used on Workforce and weekly Progress. "
+        "Areas (Helység) Excel is optional — used on the Areas page."
     )
     status_file = st.sidebar.file_uploader("Status list (Progressliste)", type=["xlsx"], key="status_file")
-    catra_file = st.sidebar.file_uploader("CaTra cable list", type=["xlsx"], key="catra_file")
+    catra_file = st.sidebar.file_uploader(
+        "CaTra / Gesamtliste (Kabelziehliste)",
+        type=["xlsx"],
+        key="catra_file",
+        help="CaTra Kabelliste or newer Kabelziehliste Gesamtliste export.",
+    )
     wf_year = st.sidebar.number_input(
         "Workforce year",
         min_value=2020,
@@ -191,6 +247,12 @@ def render_uploads() -> None:
         type=["xlsx"],
         key="workforce_file",
         help="Name / position / daily hours sheets. H = holiday.",
+    )
+    areas_file = st.sidebar.file_uploader(
+        "Areas / Helység (optional)",
+        type=["xlsx"],
+        key="areas_file",
+        help="Name, deck, trays, penetrations per room.",
     )
 
     if status_file and catra_file:
@@ -207,7 +269,9 @@ def render_uploads() -> None:
                 status = parse_status_list(status_file)
                 catra = parse_catra_list(catra_file)
                 joined = join_cable_data(status, catra)
+                joined = enrich_joined_for_reconcile(status, catra, joined)
                 only_status, only_catra = unmatched_ids(status, catra)
+                conflicts = field_mismatches(joined)
             except Exception as exc:
                 st.sidebar.error(f"Could not parse files: {exc}")
                 return
@@ -217,6 +281,7 @@ def render_uploads() -> None:
                     "header": list(catra.attrs.get("catra_header") or []),
                     "only_status": only_status,
                     "only_catra": only_catra,
+                    "field_conflicts": conflicts,
                     "status_name": status_file.name,
                     "catra_name": catra_file.name,
                     "signature": signature,
@@ -269,6 +334,39 @@ def render_uploads() -> None:
                 )
     _show_workforce_status()
 
+    if areas_file is not None:
+        areas_sig = _areas_signature(areas_file)
+        already_areas = (
+            st.session_state.get("areas_signature") == areas_sig
+            and st.session_state.get("areas") is not None
+        )
+        if not already_areas:
+            try:
+                areas_file.seek(0)
+                areas = parse_areas_excel(areas_file)
+            except Exception as exc:
+                st.sidebar.error(f"Could not parse areas file: {exc}")
+                areas = None
+            if areas is not None:
+                saved_at = datetime.now().isoformat(timespec="seconds")
+                try:
+                    save_areas(
+                        areas=areas,
+                        file_name=areas_file.name,
+                        signature=areas_sig,
+                    )
+                except Exception as exc:
+                    st.sidebar.warning(f"Could not save areas locally: {exc}")
+                _apply_areas(
+                    {
+                        "areas": areas,
+                        "file_name": areas_file.name,
+                        "signature": areas_sig,
+                        "saved_at": saved_at,
+                    }
+                )
+    _show_areas_status()
+
     if st.session_state.get("joined") is not None:
         if st.sidebar.button("Clear cable data", use_container_width=True):
             _clear_loaded_data()
@@ -277,6 +375,10 @@ def render_uploads() -> None:
     if st.session_state.get("workforce") is not None:
         if st.sidebar.button("Clear workforce data", use_container_width=True):
             _clear_workforce_state()
+            st.rerun()
+    if st.session_state.get("areas") is not None:
+        if st.sidebar.button("Clear areas data", use_container_width=True):
+            _clear_areas_state()
             st.rerun()
 
 

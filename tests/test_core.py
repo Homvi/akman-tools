@@ -177,6 +177,8 @@ def test_parse_join_filters_and_stops():
     assert set(joined["join_key"]) == {"2", "6", "7"}
     assert joined.loc[joined["join_key"] == "2", "Category"].iloc[0] == "Cat3"
     assert joined.loc[joined["join_key"] == "6", "Thickness"].iloc[0] == "Thick"
+    # Liste from L#### note when present
+    assert catra.loc[catra["join_key"] == "2", "Liste"].iloc[0] == "L0019"
 
     not_pulled = apply_filters(joined, pulled=[PULL_NOT])
     assert list(not_pulled["join_key"]) == ["7"]
@@ -767,4 +769,208 @@ def test_workforce_headcount_and_positions():
     assert float(per_h.loc[per_h["Date"].eq("2026-09-01"), "Hours"].iloc[0]) == 20.0
     assert float(per_h.loc[per_h["Date"].eq("2026-09-01"), "Meters"].iloc[0]) == 20.0
 
+
+def _gesamt_xlsx_with_liste_separator() -> BytesIO:
+    """New Kabelziehliste-style export with a Liste: section row between blocks."""
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["CaTra - Kabelziehliste"])
+    ws.append(["Objekt: 598"])
+    ws.append(["Erstellt: am 28.09.2026"])
+    ws.append(["Kabel", "Artikel / Zeichnung", None, "Länge", "ALP", None, "Knoten", "A.län.", "Ort", "Gerät"])
+    ws.append(["Liste: 0005 | Ringkabel"])
+    ws.append(["5000 (E) K1", "Ship PWR", "2x25", 25, None, "A:", "1EDV217.1", 7, "1D", "Main Dist"])
+    ws.append(["MDS", "1a MDS", None, None, None, "E:", "1E2119", 5.5, "1D", "24V Dist"])
+    ws.append(["L0005 TKF"])
+    ws.append(["1EDV217.1 (E 0,0) 1EDV217 (E 1,0) 1E2119"])
+    ws.append(["Liste: 0008 | Other"])
+    ws.append(["5001 (E) K1", "Ship PWR", "3x95", 40, None, "A:", "1E1206", 4, "1D", "DG"])
+    ws.append(["PWR", "0008", None, None, None, "E:", "1EDV207.1", 4, "1D", "Converter"])
+    ws.append(["L0008 Stolze"])
+    ws.append(["1E1206 (E 2,0) 1EDV207.1"])
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def test_parse_catra_liste_separator_and_liste_field():
+    catra = parse_catra_list(_gesamt_xlsx_with_liste_separator())
+    assert set(catra["join_key"]) == {"5000", "5001"}
+    assert list(catra["Liste"]) == ["L0005", "L0008"]
+    assert "1EDV217.1" in str(catra.loc[catra["join_key"] == "5000", "Pfad"].iloc[0])
+
+
+def test_reconcile_unmatched_and_length_conflict():
+    from src.join import unmatched_ids
+    from src.reconcile import enrich_joined_for_reconcile, field_mismatches, reconcile_report
+
+    status = pd.DataFrame(
+        {
+            "Kabelnr": ["5000", "9999"],
+            "join_key": ["5000", "9999"],
+            "Zuschn": [30.0, 10.0],
+            "A_Geraet": ["Main Dist", "X"],
+            "E_Geraet": ["24V Dist", "Y"],
+            "Liste": ["0005", "1"],
+            "verlegt": [pd.NaT, pd.NaT],
+            "Total_teilgezogene_meter": [0.0, 0.0],
+            "Startsegment_1": [pd.NA, pd.NA],
+            "Endsegment_1": [pd.NA, pd.NA],
+            "Gestoppt_1": [pd.NaT, pd.NaT],
+            "Pulled": [False, False],
+        }
+    )
+    catra = parse_catra_list(_gesamt_xlsx_with_liste_separator())
+    only_status, only_catra = unmatched_ids(status, catra)
+    assert "9999" in only_status
+    assert "5001" in only_catra
+
+    report = reconcile_report(status, catra)
+    assert "9999" in report["only_status"]
+    assert "5001" in report["only_catra"]
+
+    joined = join_cable_data(status, catra)
+    joined = enrich_joined_for_reconcile(status, catra, joined)
+    conflicts = field_mismatches(joined)
+    # 5000: Zuschn 30 vs Laenge 25 → Length_m conflict
+    length_rows = conflicts[conflicts["field"] == "Length_m"]
+    assert not length_rows.empty
+    assert str(length_rows.iloc[0]["Kabelnr"]) == "5000"
+    assert float(length_rows.iloc[0]["progress_value"]) == 30.0
+    assert float(length_rows.iloc[0]["gesamt_value"]) == 25.0
+
+
+def test_areas_membership_remaining_hours_eta_blocking():
+    from datetime import date
+
+    from src.areas import (
+        AreaDef,
+        affected_areas,
+        classify_cable_in_area,
+        estimate_schedule,
+        parse_areas_excel,
+        parse_node_list,
+        person_hours,
+        summarize_all_areas,
+        summarize_area,
+    )
+
+    assert parse_node_list("1E5101; 1E5103;1E5102;") == ["1E5101", "1E5103", "1E5102"]
+
+    hely_path = r"c:\Users\User\Desktop\Helység adatok.xlsx"
+    try:
+        areas_real = parse_areas_excel(hely_path)
+        assert len(areas_real) >= 10
+        assert any(a.name == "Misc. Room" for a in areas_real)
+    except FileNotFoundError:
+        pass
+
+    area = AreaDef(
+        key="Room|Main|1",
+        name="Room",
+        deck="Main",
+        area_ids="1",
+        trays=["1E2002", "1E2003"],
+        penetrations=["1EDH201"],
+    )
+    route = "1E2001 (E 10,0) 1E2002 (E 20,0) 1EDH201 (E 30,0) 1E2004"
+
+    row_none = pd.Series(
+        {
+            "Kabelnr": "100",
+            "Pfad": route,
+            "Length_m": 99.0,
+            "Thickness": "Thin",
+            "Knoten_A": "1E2001",
+            "Knoten_E": "1E2004",
+            "verlegt": pd.NaT,
+            "Startsegment_1": None,
+            "Endsegment_1": None,
+            "Gestoppt_1": None,
+        }
+    )
+    info = classify_cable_in_area(row_none, area)
+    assert info is not None
+    assert info["through"] is True
+    assert info["remaining_m"] == 99.0
+
+    row_partial = row_none.copy()
+    row_partial["Kabelnr"] = "101"
+    row_partial["Startsegment_1"] = "1E2001"
+    row_partial["Endsegment_1"] = "1E2002"
+    row_partial["Gestoppt_1"] = date(2026, 9, 1)
+    info_p = classify_cable_in_area(row_partial, area)
+    assert info_p is not None
+    assert info_p["stop"] is True
+    assert round(info_p["remaining_m"], 1) == 20.0
+
+    row_past = row_partial.copy()
+    row_past["Kabelnr"] = "102"
+    row_past["Endsegment_1"] = "1E2004"
+    assert classify_cable_in_area(row_past, area)["remaining_m"] == 0.0
+
+    row_done = row_none.copy()
+    row_done["Kabelnr"] = "104"
+    row_done["verlegt"] = date(2026, 9, 10)
+    assert classify_cable_in_area(row_done, area)["remaining_m"] == 0.0
+
+    hours = person_hours(40.0, 6.0, thin_pace=20.0, thick_pace=3.0, unchecked_stuetzen=2, h_per_stuetze=5.0)
+    assert round(hours, 1) == 14.0
+
+    sched = estimate_schedule(112.0, pullers=2, hours_per_week=56.0, as_of=date(2026, 9, 7))
+    assert sched["workdays"] == 5
+    assert sched["end_date"] == date(2026, 9, 11)
+    assert sched["kw"] == "KW37 2026"
+
+    zero = estimate_schedule(0.0, pullers=2, hours_per_week=56.0, as_of=date(2026, 9, 7))
+    assert zero["workdays"] == 0
+    assert zero["kw"] == "KW37 2026"
+
+    df = pd.DataFrame(
+        [
+            {
+                "Kabelnr": "200",
+                "Pfad": route,
+                "Length_m": 50.0,
+                "Thickness": "Thin",
+                "Knoten_A": "1E2001",
+                "Knoten_E": "1E2004",
+                "verlegt": date(2026, 9, 10),
+                "Startsegment_1": "1E2001",
+                "Endsegment_1": "1E2004",
+                "Gestoppt_1": date(2026, 9, 1),
+            },
+            {
+                "Kabelnr": "201",
+                "Pfad": route,
+                "Length_m": 80.0,
+                "Thickness": "Thick",
+                "Knoten_A": "1E2001",
+                "Knoten_E": "1E2004",
+                "verlegt": pd.NaT,
+                "Startsegment_1": None,
+                "Endsegment_1": None,
+                "Gestoppt_1": None,
+            },
+        ]
+    )
+    summary = summarize_area(
+        area, df, installed_stuetzen=[], thin_pace=20, thick_pace=3, h_per_stuetze=5, pullers=1, hours_per_week=56
+    )
+    assert summary["cables"] == 2
+    assert summary["pulled"] == 1
+    assert round(summary["remaining_thick_m"], 1) == 80.0
+
+    area_b = AreaDef(
+        key="Hall|Main|2",
+        name="Hall",
+        deck="Main",
+        area_ids="2",
+        trays=["1E2004"],
+        penetrations=[],
+    )
+    summaries = summarize_all_areas([area, area_b], df)
+    affected = affected_areas(f"area:{area.key}", [area, area_b], summaries, df)
+    assert any(a.key == area_b.key for a in affected)
 

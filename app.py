@@ -4,7 +4,9 @@ import streamlit as st
 
 from src.ui import render_uploads
 from views.all_cables import render as render_all_cables
+from views.areas import render as render_areas
 from views.calculator import render as render_calculator
+from views.errors import render as render_errors
 from views.guide import render as render_guide
 from views.id_export import render as render_id_export
 from views.progress import render as render_progress
@@ -21,9 +23,11 @@ pages = {
     "stopped": st.Page(render_stopped, title="Stopped cables", url_path="stopped"),
     "stutzen": st.Page(render_stutzen, title="Stütze / Bahn szűrő", url_path="stutzen"),
     "id_export": st.Page(render_id_export, title="Cable ID export", url_path="id-export"),
+    "areas": st.Page(render_areas, title="Areas", url_path="areas"),
     "workforce": st.Page(render_workforce, title="Workforce", url_path="workforce"),
     "routes": st.Page(render_routes, title="Nyomvonal-csoportok", url_path="routes"),
     "progress": st.Page(render_progress, title="Progress", url_path="progress"),
+    "errors": st.Page(render_errors, title="Hibák", url_path="errors"),
     "calculator": st.Page(render_calculator, title="Hossz kalkulátor", url_path="calculator"),
     "guide": st.Page(render_guide, title="Hogyan működik", url_path="guide"),
 }
