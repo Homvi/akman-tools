@@ -56,12 +56,24 @@ pytest
 
 Point the app at `app.py` on the branch you want to publish (typically `main`). Set secrets / env in the Cloud dashboard if you enable password protection later (`APP_PASSWORD`; see `.env.example`).
 
+## Documentation
+
+How the app works is explained in separate files under [`docs/`](docs/README.md):
+
+| Topic | English | Deutsch |
+|-------|---------|---------|
+| Overview | [docs/overview.en.md](docs/overview.en.md) | [docs/overview.de.md](docs/overview.de.md) |
+| **Estimation / KW (Areas)** | [docs/estimation.en.md](docs/estimation.en.md) | **[docs/estimation.de.md](docs/estimation.de.md)** |
+| Data sources | [docs/data-sources.en.md](docs/data-sources.en.md) | [docs/data-sources.de.md](docs/data-sources.de.md) |
+| Pages | [docs/pages.en.md](docs/pages.en.md) | [docs/pages.de.md](docs/pages.de.md) |
+
 ## Project layout
 
 ```
 app.py              # navigation + uploads
 views/              # one module per page
 src/                # parse, join, filters, export, progress, workforce, store
+docs/               # how-it-works (EN / DE), estimation system
 tests/              # pytest suite
 data/               # local SQLite cache (gitignored)
 .streamlit/         # theme / server config
