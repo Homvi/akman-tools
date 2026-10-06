@@ -12,6 +12,8 @@ from src.dates import series_to_dates
 from src.ids import join_key, normalize_kabel_id
 
 _CABLE_ID = re.compile(r"^\s*\d")
+_CABLE_START = re.compile(r"^\s*\d.*\(E\)", re.IGNORECASE)
+_LISTE_TOKEN = re.compile(r"^L\d+", re.IGNORECASE)
 
 _STATUS_ALIASES = {
     "stat": "Stat",
@@ -128,13 +130,15 @@ def parse_status_list(source: str | BytesIO | BinaryIO) -> pd.DataFrame:
 
 def parse_catra_list(source: str | BytesIO | BinaryIO) -> pd.DataFrame:
     raw = pd.read_excel(_as_excel(source), sheet_name=0, header=None, engine="openpyxl")
-    start = _first_block_row(raw)
-    header_rows = [_row_values(raw.iloc[i]) for i in range(start)]
+    starts = _cable_block_starts(raw)
+    if not starts:
+        raise ValueError("No 4-row CaTra cable blocks were found.")
+    header_rows = [_row_values(raw.iloc[i]) for i in range(starts[0])]
     records = []
-    for idx in range(start, len(raw), 4):
+    for idx in starts:
         block = raw.iloc[idx : idx + 4]
         if len(block) < 4:
-            break
+            continue
         record = _flatten_catra_block(block)
         if record:
             record["_block"] = [_row_values(block.iloc[r]) for r in range(len(block))]
@@ -146,7 +150,24 @@ def parse_catra_list(source: str | BytesIO | BinaryIO) -> pd.DataFrame:
     return out
 
 
+def _cable_block_starts(raw: pd.DataFrame) -> list[int]:
+    """Row indices where a cable block begins (col0 looks like '1234 (E) …')."""
+    starts: list[int] = []
+    col0 = raw.iloc[:, 0].tolist() if raw.shape[1] else []
+    for i, value in enumerate(col0):
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            continue
+        text = str(value).strip()
+        if _CABLE_START.match(text):
+            starts.append(i)
+    return starts
+
+
 def _first_block_row(raw: pd.DataFrame) -> int:
+    starts = _cable_block_starts(raw)
+    if starts:
+        return starts[0]
+    # Legacy fallback: first numeric id in col0
     for i, value in enumerate(raw.iloc[:, 0].tolist()):
         if value is not None and not (isinstance(value, float) and pd.isna(value)):
             if _CABLE_ID.match(str(value)):
@@ -175,6 +196,16 @@ def _cell(block: pd.DataFrame, row: int, col: int) -> str:
     return str(value).strip()
 
 
+def _liste_from_block(block: pd.DataFrame) -> str:
+    """Prefer L#### from note row; fall back to legacy row1 col1."""
+    note = _cell(block, 2, 0)
+    if note:
+        token = note.split()[0] if note.split() else note
+        if _LISTE_TOKEN.match(token):
+            return token
+    return _cell(block, 1, 1)
+
+
 def _flatten_catra_block(block: pd.DataFrame) -> dict | None:
     kabel_raw = _cell(block, 0, 0)
     if not kabel_raw or not _CABLE_ID.match(kabel_raw):
@@ -192,7 +223,7 @@ def _flatten_catra_block(block: pd.DataFrame) -> dict | None:
         "join_key": join_key(kabel_raw),
         "Category": extract_k_category(kabel_raw),
         "Artikel": _cell(block, 0, 1),
-        "Liste": _cell(block, 1, 1),
+        "Liste": _liste_from_block(block),
         "Typ": _cell(block, 0, 2),
         "Laenge": laenge,
         "Knoten_A": _cell(block, 0, 6),
