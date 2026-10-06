@@ -197,13 +197,16 @@ def _first_value(row: pd.Series, *names):
         if name not in row.index:
             continue
         value = row.get(name)
-        if value is None or value == "":
+        if value is None or value is pd.NA:
             continue
         try:
             if pd.isna(value):
                 continue
         except (TypeError, ValueError):
             pass
+        text = str(value).strip()
+        if text == "" or text.lower() in {"nan", "<na>", "none", "nat"}:
+            continue
         return value
     return None
 
