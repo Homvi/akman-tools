@@ -1,50 +1,46 @@
 # Cable installation analysis
 
-Streamlit app for cable-pull planning and tracking on site. It joins a **Progressliste** (status) Excel with a **CaTra / Gesamtliste** (Kabelliste or Kabelziehliste), then filters, exports, and charts progress. An optional **workforce hours** Excel powers headcount and productivity views.
+Site cable-pull planning: joins **Progressliste** + **CaTra / Gesamtliste**, filters, exports, areas scheduling, workforce, and progress charts.
 
-## Requirements
+## Preferred stack (Hetzner Docker)
 
-- Python 3.10+
-- Progressliste + CaTra / Gesamtliste (`.xlsx`) for cable pages
-- Workforce hours Excel (optional) for Workforce and weekly Progress hours
-- Areas / Helység Excel (optional) for the Areas page (trays + penetrations per room)
+- **API:** FastAPI (`apps/api`) wrapping existing Python domain (`src/`)
+- **Web:** Next.js + shadcn-style UI (`apps/web`) — design: [`docs/design-system.md`](docs/design-system.md)
+- **DB:** Postgres 16 (Compose; port not published)
+- **Proxy:** Caddy (TLS on server)
+
+```bash
+cp .env.example .env
+# edit secrets
+docker compose up -d --build
+```
+
+Local ports (override): API [http://localhost:8000](http://localhost:8000), Web [http://localhost:3000](http://localhost:3000).  
+Default login: `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env` (defaults `admin@example.com` / `changeme`).
+
+Deploy notes: [`deploy/HETZNER.md`](deploy/HETZNER.md).
+
+### Update on server
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+## Legacy Streamlit
+
+Still available during cutover:
 
 ```bash
 pip install -r requirements.txt
-```
-
-## Run locally
-
-```bash
 streamlit run app.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
+Open [http://localhost:8501](http://localhost:8501). Prefer the Docker stack for demos and production.
 
-Uploads live in the sidebar under **Data files**. Cable, workforce, and areas data are cached in a local SQLite DB under `data/` so you do not need to re-upload every session. Use the Clear buttons to reset.
+## Domain logic
 
-## Pages
-
-| Page | What it does |
-|------|----------------|
-| **All cables** | Shared filters, live length total, copy lists (pulled / started), CaTra + Kurzliste export |
-| **Stopped cables** | Cables with a stop date, grouped by Endsegment, remaining meters, exports |
-| **Stütze / Bahn szűrő** | Paste Stütze numbers (`;`), unique-only, AND/OR on pathway, CaTra / Kurzliste |
-| **Cable ID export** | Paste cable IDs (`;` or newlines); `5012.1` = `5012,1`; dedupe; combined export |
-| **Areas** | Helység rooms: thick/thin through/terminate/stops, pulled %, remaining m + Stütze hours → ETA workdays / KW; block tray/pen/area |
-| **Workforce** | Daily headcount by position, growth charts, date range, m/person and m/hour when cable data is loaded (`H` = holiday) |
-| **Nyomvonal-csoportok** | Pathway groups (~90% path match), exports |
-| **Progress** | Daily / weekly (KW) pulled meters; work hours on weekly chart when workforce is loaded |
-| **Hibák** | Progressliste ↔ Gesamtliste: IDs only on one side; length / A–E Gerät / Liste field conflicts |
-| **Hossz kalkulátor** | Partial pull length from pathway segments + A/E allowances; highlight overlap with already pulled path |
-| **Hogyan működik** | Short in-app guide with links to each page |
-
-Shared sidebar filters (Gerät, pull status, thickness, category, stop Stütze) apply across the cable pages.
-
-### Exports
-
-- **CaTra (húzókártya):** multi-row pull card with pathway layout  
-- **Kurzliste:** one row per cable including pathway  
+Unchanged under `src/` (parsers, join, areas, export, progress, workforce, reconcile). API is a thin adapter; do not rewrite parse logic in TypeScript.
 
 ## Tests
 
@@ -52,29 +48,15 @@ Shared sidebar filters (Gerät, pull status, thickness, category, stop Stütze) 
 pytest
 ```
 
-## Deploy (Streamlit Community Cloud)
-
-Point the app at `app.py` on the branch you want to publish (typically `main`). Set secrets / env in the Cloud dashboard if you enable password protection later (`APP_PASSWORD`; see `.env.example`).
-
-## Documentation
-
-How the app works is explained in separate files under [`docs/`](docs/README.md):
-
-| Topic | English | Deutsch |
-|-------|---------|---------|
-| Overview | [docs/overview.en.md](docs/overview.en.md) | [docs/overview.de.md](docs/overview.de.md) |
-| **Estimation / KW (Areas)** | [docs/estimation.en.md](docs/estimation.en.md) | **[docs/estimation.de.md](docs/estimation.de.md)** |
-| Data sources | [docs/data-sources.en.md](docs/data-sources.en.md) | [docs/data-sources.de.md](docs/data-sources.de.md) |
-| Pages | [docs/pages.en.md](docs/pages.en.md) | [docs/pages.de.md](docs/pages.de.md) |
-
 ## Project layout
 
 ```
-app.py              # navigation + uploads
-views/              # one module per page
-src/                # parse, join, filters, export, progress, workforce, store
-docs/               # how-it-works (EN / DE), estimation system
-tests/              # pytest suite
-data/               # local SQLite cache (gitignored)
-.streamlit/         # theme / server config
+apps/api/           # FastAPI
+apps/web/           # Next.js UI
+src/                # Python domain
+views/ app.py       # Legacy Streamlit
+docs/design-system.md
+docker-compose.yml
+deploy/             # Caddyfile + Hetzner runbook
+tests/
 ```

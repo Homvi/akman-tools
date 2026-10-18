@@ -75,13 +75,20 @@ def route_node_set(pfad) -> set[str]:
     return {token for token in cleaned.split() if token}
 
 
+def route_node_set_folded(pfad) -> set[str]:
+    return {token.casefold() for token in route_node_set(pfad)}
+
+
 def route_matches(pfad, nodes: list[str], mode: str) -> bool:
     if not nodes:
         return False
-    found = route_node_set(pfad)
+    found = route_node_set_folded(pfad)
+    needles = [str(node).casefold() for node in nodes if str(node).strip()]
+    if not needles:
+        return False
     if str(mode).upper() == MODE_AND:
-        return all(node in found for node in nodes)
-    return any(node in found for node in nodes)
+        return all(node in found for node in needles)
+    return any(node in found for node in needles)
 
 
 def cable_route(row: pd.Series) -> str:

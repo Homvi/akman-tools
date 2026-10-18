@@ -33,6 +33,10 @@ _STATUS_ALIASES = {
     "zuschn": "Zuschn",
     "verlegt": "verlegt",
     "bemerkung": "Bemerkung",
+    "vorbereitung 1": "Vorbereitung_1",
+    "vorbereitung 2": "Vorbereitung_2",
+    "anschluss 1": "Anschluss_1",
+    "anschluss 2": "Anschluss_2",
     "startsegment_1": "Startsegment_1",
     "endsegment_1": "Endsegment_1",
     "gestoppt_1": "Gestoppt_1",
@@ -89,6 +93,10 @@ def parse_status_list(source: str | BytesIO | BinaryIO) -> pd.DataFrame:
         df["verlegt"] = series_to_dates(df["verlegt"])
     else:
         df["verlegt"] = pd.NaT
+
+    for col in ("Anschluss_1", "Anschluss_2", "Vorbereitung_1", "Vorbereitung_2"):
+        if col in df.columns:
+            df[col] = series_to_dates(df[col])
 
     for slot in (1, 2, 3):
         gcol = f"Gestoppt_{slot}"

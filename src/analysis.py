@@ -26,7 +26,11 @@ def assign_pull_status(df: pd.DataFrame) -> pd.DataFrame:
     if "Pull_status" in df.columns:
         return df
     out = df.copy()
-    pulled = out["Pulled"].eq(True) if "Pulled" in out.columns else False
+    pulled = (
+        out["Pulled"].eq(True)
+        if "Pulled" in out.columns
+        else pd.Series(False, index=out.index)
+    )
     started = _has_startsegment(out)
     status = pd.Series(PULL_NOT, index=out.index)
     status = status.mask(started, PULL_PARTIAL)

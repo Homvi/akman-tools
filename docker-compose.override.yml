@@ -1,0 +1,10 @@
+# Local development: expose API and web ports without needing Caddy
+services:
+  api:
+    ports:
+      - "8000:8000"
+  web:
+    ports:
+      - "3000:3000"
+  caddy:
+    profiles: ["prod"]

@@ -1,0 +1,25 @@
+{
+	# For local/dev without a real domain, use http only via :80
+	auto_https off
+}
+
+:80 {
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}
+
+# Production: replace with your domain and remove auto_https off above, e.g.:
+# your.domain.com {
+#   handle /api/* {
+#     uri strip_prefix /api
+#     reverse_proxy api:8000
+#   }
+#   handle {
+#     reverse_proxy web:3000
+#   }
+# }

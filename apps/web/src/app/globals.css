@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #09090b;
+  --surface: #0c0c0e;
+  --surface-2: #18181b;
+  --border: #27272a;
+  --foreground: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #2dd4bf;
+  --accent-fg: #042f2e;
+  --orange: #f97316;
+  --orange-fg: #431407;
+  --danger: #f87171;
+  --success: #34d399;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-plex-sans), system-ui, sans-serif;
+}
+
+.font-mono-data {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+@keyframes top-progress {
+  0% {
+    transform: translateX(-100%);
+    width: 35%;
+  }
+  50% {
+    width: 55%;
+  }
+  100% {
+    transform: translateX(280%);
+    width: 35%;
+  }
+}
+
+.top-progress-bar {
+  animation: top-progress 1.15s ease-in-out infinite;
+}
+
+/* native selects/inputs on dark */
+select,
+textarea,
+input {
+  color-scheme: dark;
+}

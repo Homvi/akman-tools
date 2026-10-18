@@ -15,7 +15,11 @@ from views.stopped import render as render_stopped
 from views.stutzen import render as render_stutzen
 from views.workforce import render as render_workforce
 
-st.set_page_config(page_title="Cable installation", layout="wide")
+st.set_page_config(page_title="Cable installation (legacy Streamlit)", layout="wide")
+st.sidebar.info(
+    "Legacy Streamlit UI. Prefer the Next.js app (`apps/web`) + FastAPI (`apps/api`) "
+    "via `docker compose up`. See deploy/HETZNER.md."
+)
 render_uploads()
 
 pages = {

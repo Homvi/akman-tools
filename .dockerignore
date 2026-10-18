@@ -1,0 +1,14 @@
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.git
+**/data
+**/*.pyc
+**/.venv
+**/venv
+**/dist
+**/coverage
+**/.turbo
+agent-transcripts
+.cursor

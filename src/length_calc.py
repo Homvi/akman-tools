@@ -37,6 +37,9 @@ class CalcResult:
     ok: bool
     meters: float = 0.0
     error: str = ""
+    route_m: float = 0.0
+    allowance_a: float = 0.0
+    allowance_e: float = 0.0
 
 
 @dataclass
@@ -134,15 +137,27 @@ def cable_status_message(row: pd.Series) -> str:
     return base
 
 
-def _ordered_span(nodes: list[str], a: str, b: str) -> tuple[int, int] | None:
-    a = str(a or "").strip()
-    b = str(b or "").strip()
-    if not a or not b:
+def _node_index(nodes: list[str], name: str) -> int | None:
+    """Case-insensitive node lookup; returns index or None."""
+    needle = str(name or "").strip()
+    if not needle:
         return None
-    try:
-        i = nodes.index(a)
-        j = nodes.index(b)
-    except ValueError:
+    for i, node in enumerate(nodes):
+        if str(node).strip().casefold() == needle.casefold():
+            return i
+    return None
+
+
+def _nodes_equal(left: str, right: str) -> bool:
+    a = str(left or "").strip()
+    b = str(right or "").strip()
+    return bool(a) and bool(b) and a.casefold() == b.casefold()
+
+
+def _ordered_span(nodes: list[str], a: str, b: str) -> tuple[int, int] | None:
+    i = _node_index(nodes, a)
+    j = _node_index(nodes, b)
+    if i is None or j is None:
         return None
     return (i, j) if i <= j else (j, i)
 
@@ -479,22 +494,26 @@ def calculate_pulled_length(
         return CalcResult(False, error="Hiba: A nyomvonal, a startpont és a végpont megadása kötelező!")
 
     nodes, distances = parse_route(route)
-    try:
-        start_idx = nodes.index(start)
-        end_idx = nodes.index(end)
-    except ValueError:
+    start_idx = _node_index(nodes, start)
+    end_idx = _node_index(nodes, end)
+    if start_idx is None or end_idx is None:
         return CalcResult(False, error="Hiba: A megadott Startpont vagy Végpont nem található a nyomvonalban!")
 
     if start_idx > end_idx:
         start_idx, end_idx = end_idx, start_idx
 
-    total = 0.0
+    route_m = 0.0
     for i in range(start_idx, end_idx):
         if i < len(distances):
-            total += distances[i]
+            route_m += distances[i]
 
-    if start == node_a or end == node_a:
-        total += float(allow_a or 0)
-    if start == node_e or end == node_e:
-        total += float(allow_e or 0)
-    return CalcResult(True, meters=total)
+    applied_a = float(allow_a or 0) if (_nodes_equal(start, node_a) or _nodes_equal(end, node_a)) else 0.0
+    applied_e = float(allow_e or 0) if (_nodes_equal(start, node_e) or _nodes_equal(end, node_e)) else 0.0
+    total = route_m + applied_a + applied_e
+    return CalcResult(
+        True,
+        meters=total,
+        route_m=route_m,
+        allowance_a=applied_a,
+        allowance_e=applied_e,
+    )

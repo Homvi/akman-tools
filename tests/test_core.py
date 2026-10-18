@@ -633,6 +633,9 @@ def test_stutzen_filter_and_or():
     assert list(either["Kabelnr"]) == ["1", "3"]
     dotted = filter_by_nodes(df, ["1EDV606.1"], "OR")
     assert list(dotted["Kabelnr"]) == ["1"]
+    # case-insensitive Stütze / Bahn match
+    lower = filter_by_nodes(df, ["1edv606", "1e2104"], "AND")
+    assert list(lower["Kabelnr"]) == ["1", "3"]
     assert stutzen_filename(nodes) == "stutzen_1EDV606_1E2104.xlsx"
 
     unique_nodes = parse_search_nodes("1EDV606; 1E2104; 1EDV606", unique_only=True)
