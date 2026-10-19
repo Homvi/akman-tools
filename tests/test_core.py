@@ -586,6 +586,28 @@ def test_cable_pull_status_not_pulled_is_not_complete():
         assert cable_pull_status(row) == STATUS_NONE
 
 
+def test_area_bahn_stuetzen_split():
+    from src.areas import AreaDef, area_nodes_for_kind, areas_node_catalog
+
+    area = AreaDef(
+        key="room-a",
+        name="Room A",
+        deck="01",
+        area_ids="A1",
+        trays=["1E2104", "1EDV606", "1E2105"],
+        penetrations=["3EDH407"],
+    )
+    assert area.bahnen == ["1E2104", "1E2105"]
+    assert area.stuetzen == ["1EDV606", "3EDH407"]
+    assert area_nodes_for_kind(area, "bahn") == ["1E2104", "1E2105"]
+    assert area_nodes_for_kind(area, "stuetzen") == ["1EDV606", "3EDH407"]
+    assert area_nodes_for_kind(area, "both") == ["1E2104", "1EDV606", "1E2105", "3EDH407"]
+    catalog = areas_node_catalog([area])
+    assert catalog[0]["bahn_count"] == 2
+    assert catalog[0]["stuetzen_count"] == 2
+    assert catalog[0]["all_count"] == 4
+
+
 def test_stuetzen_bahn_filter():
     from openpyxl import load_workbook
 
@@ -646,6 +668,53 @@ def test_stutzen_filter_and_or():
     assert stats["duplicate_count"] == 2
 
 
+def test_stutzen_pull_status_filter_and_export_columns():
+    from src.analysis import PULL_NOT, PULL_PARTIAL, PULL_YES
+    from src.stutzen_filter import (
+        filter_by_pull_statuses,
+        pull_status_counts,
+        select_export_columns,
+    )
+
+    df = pd.DataFrame(
+        {
+            "Kabelnr": ["1", "2", "3"],
+            "Liste": ["L1", "L2", "L3"],
+            "Category": ["thin", "thick", "thin"],
+            "Thickness": ["thin", "thick", "thin"],
+            "Length_m": [10, 20, 30],
+            "Pull_status": [PULL_NOT, PULL_PARTIAL, PULL_YES],
+            "Geraet_A": ["A1", "A2", "A3"],
+            "Geraet_E": ["E1", "E2", "E3"],
+            "verlegt": [None, None, "12.08.2026"],
+            "Gestoppt_1": [None, "01.09.2026", "01.08.2026"],
+            "Startsegment_1": [None, "1E2104", "1E1000"],
+            "Endsegment_1": [None, "1EDV606", "1E2000"],
+            "Gestoppt_2": [None, "05.09.2026", None],
+            "Startsegment_2": [None, "1EDV606", None],
+            "Endsegment_2": [None, "1E3206", None],
+            "Pfad": ["a", "b", "c"],
+        }
+    )
+    counts = pull_status_counts(df)
+    assert counts == {"not_started": 1, "started": 1, "fully_pulled": 1}
+    from src.stutzen_filter import thickness_counts
+
+    assert thickness_counts(df) == {"thick": 1, "thin": 2, "unknown": 0}
+    started = filter_by_pull_statuses(df, ["started"])
+    assert list(started["Kabelnr"]) == ["2"]
+    slim = select_export_columns(started, ["kabelnr", "liste", "stop_location", "stop_locations"])
+    assert list(slim.columns) == ["Kabelnr", "Liste", "Megállítás", "Megállítások"]
+    # Only the overall current span (first start → latest end), not every stop.
+    assert slim.iloc[0]["Megállítás"] == "1E2104 → 1E3206"
+    assert slim.iloc[0]["Megállítások"] == "1E2104 → 1E3206"
+    fully = filter_by_pull_statuses(df, ["fully_pulled"])
+    fully_slim = select_export_columns(fully, ["kabelnr", "stop_location", "stop_locations"])
+    # verlegt → Megállítás empty even when Start/End remain filled
+    assert fully_slim.iloc[0]["Megállítás"] == ""
+    assert fully_slim.iloc[0]["Megállítások"] == ""
+
+
 def test_partial_length_calculator():
     from src.length_calc import calculate_pulled_length, format_meters
 
@@ -660,6 +729,29 @@ def test_partial_length_calculator():
     assert not missing.ok
     empty = calculate_pulled_length("", "", 0, "", 0, "", "")
     assert not empty.ok
+
+
+def test_stichmass_from_stuetze_to_a():
+    from src.length_calc import stichmass_from_stuetze_to_a
+
+    # A ----3.1---- B ----2.0---- C ----1.5---- D(=node_a)
+    route = "3E2004 (E 3,1) 3E2005 (E 2,0) 1E3206 (E 1,5) 3EDV205"
+    # Stütze at B → A-end D: 2.0 + 1.5 + Aln_A 0.8 = 4.3
+    ok = stichmass_from_stuetze_to_a(route, "3E2005", "3EDV205", 0.8)
+    assert ok.ok
+    assert round(ok.route_m, 1) == 3.5
+    assert round(ok.allowance_a, 1) == 0.8
+    assert round(ok.meters, 1) == 4.3
+
+    # Stütze == A-end: only Aln_A
+    at_a = stichmass_from_stuetze_to_a(route, "3EDV205", "3EDV205", 1.2)
+    assert at_a.ok
+    assert round(at_a.route_m, 1) == 0.0
+    assert round(at_a.meters, 1) == 1.2
+
+    missing = stichmass_from_stuetze_to_a(route, "NINCS", "3EDV205", 0.5)
+    assert not missing.ok
+    assert "nem található" in missing.error.lower()
 
 
 def test_workforce_headcount_and_positions():
@@ -976,4 +1068,74 @@ def test_areas_membership_remaining_hours_eta_blocking():
     summaries = summarize_all_areas([area, area_b], df)
     affected = affected_areas(f"area:{area.key}", [area, area_b], summaries, df)
     assert any(a.key == area_b.key for a in affected)
+
+    from src.areas import area_cables_frame, remaining_cables_frame
+
+    all_cables = area_cables_frame(summary, df)
+    assert set(all_cables["Kabelnr"].astype(str)) == {"200", "201"}
+    rem = remaining_cables_frame(summary, df)
+    assert list(rem["Kabelnr"].astype(str)) == ["201"]
+
+
+def test_summarize_all_areas_single_pass_matches_per_area():
+    """One-pass aggregation must match classic per-area summarize_area results."""
+    from src.areas import AreaDef, summarize_all_areas, summarize_area
+
+    route = "1E2001 (E 2,0) 1EDV100 (E 3,0) 1E2004"
+    area = AreaDef(
+        key="Room|1|A",
+        name="Room",
+        deck="1",
+        area_ids="A",
+        trays=["1E2001", "1EDV100", "1E2004"],
+        penetrations=[],
+    )
+    area_b = AreaDef(
+        key="Hall|Main|2",
+        name="Hall",
+        deck="Main",
+        area_ids="2",
+        trays=["1E2004"],
+        penetrations=[],
+    )
+    df = pd.DataFrame(
+        [
+            {
+                "Kabelnr": "200",
+                "Pfad": route,
+                "Length_m": 50.0,
+                "Thickness": "Thin",
+                "Knoten_A": "1E2001",
+                "Knoten_E": "1E2004",
+                "verlegt": date(2026, 9, 10),
+                "Startsegment_1": "1E2001",
+                "Endsegment_1": "1E2004",
+                "Gestoppt_1": date(2026, 9, 1),
+            },
+            {
+                "Kabelnr": "201",
+                "Pfad": route,
+                "Length_m": 80.0,
+                "Thickness": "Thick",
+                "Knoten_A": "1E2001",
+                "Knoten_E": "1E2004",
+                "verlegt": pd.NaT,
+                "Startsegment_1": None,
+                "Endsegment_1": None,
+                "Gestoppt_1": None,
+            },
+        ]
+    )
+    one_pass = {
+        s["area"].key: s
+        for s in summarize_all_areas([area, area_b], df, apply_schedule=False)
+    }
+    for a in (area, area_b):
+        classic = summarize_area(a, df)
+        fast = one_pass[a.key]
+        assert classic["cables"] == fast["cables"]
+        assert classic["pulled"] == fast["pulled"]
+        assert round(classic["remaining_m"], 3) == round(fast["remaining_m"], 3)
+        assert round(classic["person_hours"], 3) == round(fast["person_hours"], 3)
+        assert set(classic["cable_ids"]) == set(fast["cable_ids"])
 

@@ -18,6 +18,7 @@ from apps.api.routers import (
     ids,
     progress,
     routes,
+    stichmass,
     stopped,
     stutzen,
     workforce,
@@ -56,6 +57,7 @@ app.include_router(stopped.router)
 app.include_router(stutzen.router)
 app.include_router(ids.router)
 app.include_router(calculator.router)
+app.include_router(stichmass.router)
 app.include_router(progress.router)
 app.include_router(workforce.router)
 app.include_router(areas.router)

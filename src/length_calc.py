@@ -517,3 +517,23 @@ def calculate_pulled_length(
         allowance_a=applied_a,
         allowance_e=applied_e,
     )
+
+
+def stichmass_from_stuetze_to_a(
+    route: str,
+    stuetze: str,
+    node_a: str,
+    aln_a: float = 0.0,
+) -> CalcResult:
+    """Stichmaß: distance from Stütze to A-end (Knoten_A) plus Aln_A when A is on the span."""
+    route = str(route or "").strip()
+    stuetze = str(stuetze or "").strip()
+    node_a = str(node_a or "").strip()
+    if not route or not stuetze:
+        return CalcResult(False, error="Hiba: Nyomvonal és Stütze megadása kötelező!")
+    if not node_a:
+        nodes, _ = parse_route(route)
+        node_a = nodes[0] if nodes else ""
+    if not node_a:
+        return CalcResult(False, error="Hiba: A-vég (Knoten_A) nem található!")
+    return calculate_pulled_length(route, node_a, float(aln_a or 0), node_a, 0.0, stuetze, node_a)

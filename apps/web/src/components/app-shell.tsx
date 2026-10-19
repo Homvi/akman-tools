@@ -19,6 +19,7 @@ const NAV = [
   { href: "/progress", label: "Progress" },
   { href: "/errors", label: "Hibák" },
   { href: "/calculator", label: "Calculator" },
+  { href: "/e-stichmass", label: "E-Stichmaß" },
   { href: "/upload", label: "Upload" },
   { href: "/guide", label: "Guide" },
 ];
