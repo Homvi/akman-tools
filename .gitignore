@@ -10,6 +10,8 @@ __pycache__/
 .idea/
 .vscode/
 *.xlsx
+!apps/api/defaults/
+!apps/api/defaults/*.xlsx
 ~$*.xlsx
 data/
 appdata/

@@ -48,6 +48,22 @@ export const api = {
     a.click();
     URL.revokeObjectURL(url);
   },
+  downloadPost: async (path: string, body: unknown, filename: string) => {
+    const res = await fetch(`${API_URL}${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    });
+    if (!res.ok) throw new Error("Download failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
 
 export function qs(params: Record<string, string | number | undefined | null>) {

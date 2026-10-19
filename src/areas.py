@@ -97,6 +97,47 @@ class AreaDef:
     def stuetzen(self) -> list[str]:
         return [n for n in self.nodes if is_stuetze(n)]
 
+    @property
+    def bahnen(self) -> list[str]:
+        """Cable-tray / Bahn points (non-Stütze nodes in trays + penetrations)."""
+        return [n for n in self.nodes if not is_stuetze(n)]
+
+
+def area_nodes_for_kind(area: AreaDef, kind: str) -> list[str]:
+    """kind: bahn | stuetzen | both (all trays + penetrations)."""
+    key = str(kind or "both").strip().casefold()
+    if key in {"bahn", "bahnen", "trays"}:
+        return list(area.bahnen)
+    if key in {"stuetzen", "stutze", "stütze", "stuetze"}:
+        return list(area.stuetzen)
+    return list(area.nodes)
+
+
+def areas_node_catalog(areas: list[AreaDef]) -> list[dict]:
+    """Lightweight area list with Bahn / Stütze node sets for the Stützen filter UI."""
+    out: list[dict] = []
+    for area in areas:
+        bahn = area.bahnen
+        stuetzen = area.stuetzen
+        all_nodes = area.nodes
+        out.append(
+            {
+                "key": area.key,
+                "name": area.name,
+                "deck": area.deck,
+                "area_ids": area.area_ids,
+                "label": " · ".join(p for p in (area.name, area.deck) if p),
+                "bahn": bahn,
+                "stuetzen": stuetzen,
+                "all": all_nodes,
+                "bahn_count": len(bahn),
+                "stuetzen_count": len(stuetzen),
+                "all_count": len(all_nodes),
+            }
+        )
+    out.sort(key=lambda row: (str(row.get("deck") or ""), str(row.get("name") or "")))
+    return out
+
 
 def parse_areas_excel(source) -> list[AreaDef]:
     """Parse Helység adatok sheet (header row with English column titles)."""
@@ -243,10 +284,20 @@ def _active_stop_location(row: pd.Series) -> str:
     return ""
 
 
-def classify_cable_in_area(row: pd.Series, area: AreaDef) -> dict | None:
-    """Return touch info for one cable in one area, or None if no intersection."""
-    pfad = row.get("Pfad") if hasattr(row, "get") else None
-    nodes, distances = parse_route("" if _blank(pfad) else str(pfad))
+def classify_cable_in_area(
+    row: pd.Series,
+    area: AreaDef,
+    *,
+    nodes: list[str] | None = None,
+    distances: list[float] | None = None,
+) -> dict | None:
+    """Return touch info for one cable in one area, or None if no intersection.
+
+    Pass pre-parsed ``nodes`` / ``distances`` to avoid re-parsing Pfad.
+    """
+    if nodes is None or distances is None:
+        pfad = row.get("Pfad") if hasattr(row, "get") else None
+        nodes, distances = parse_route("" if _blank(pfad) else str(pfad))
     keys = area.node_keys
     if not keys or not nodes:
         return None
@@ -465,9 +516,9 @@ def stuetze_completion(
     return rows
 
 
-def summarize_area(
+def _aggregate_area_summary(
     area: AreaDef,
-    df: pd.DataFrame,
+    cable_infos: list[tuple[pd.Series, dict]],
     *,
     installed_stuetzen: Iterable[str] | None = None,
     thin_pace: float = DEFAULT_THIN_PACE,
@@ -479,13 +530,6 @@ def summarize_area(
     as_of: date | None = None,
 ) -> dict:
     installed = {node_key(s) for s in (installed_stuetzen or [])}
-    cable_infos: list[tuple[pd.Series, dict]] = []
-    if df is not None and not df.empty:
-        for _, row in df.iterrows():
-            info = classify_cable_in_area(row, area)
-            if info is not None:
-                cable_infos.append((row, info))
-
     thin_m = 0.0
     thick_m = 0.0
     zero_thin_m = 0.0
@@ -594,6 +638,55 @@ def summarize_area(
         "schedule": schedule,
         "cable_infos": cable_infos,
     }
+
+
+def summarize_area(
+    area: AreaDef,
+    df: pd.DataFrame,
+    *,
+    installed_stuetzen: Iterable[str] | None = None,
+    thin_pace: float = DEFAULT_THIN_PACE,
+    thick_pace: float = DEFAULT_THICK_PACE,
+    h_per_stuetze: float = DEFAULT_H_PER_STUETZE,
+    pullers: float = DEFAULT_PULLERS,
+    hours_per_week: float = DEFAULT_HOURS_PER_WEEK,
+    max_per_room: float = DEFAULT_MAX_PER_ROOM,
+    as_of: date | None = None,
+) -> dict:
+    cable_infos: list[tuple[pd.Series, dict]] = []
+    if df is not None and not df.empty:
+        for _, row in df.iterrows():
+            info = classify_cable_in_area(row, area)
+            if info is not None:
+                cable_infos.append((row, info))
+    return _aggregate_area_summary(
+        area,
+        cable_infos,
+        installed_stuetzen=installed_stuetzen,
+        thin_pace=thin_pace,
+        thick_pace=thick_pace,
+        h_per_stuetze=h_per_stuetze,
+        pullers=pullers,
+        hours_per_week=hours_per_week,
+        max_per_room=max_per_room,
+        as_of=as_of,
+    )
+
+
+def build_node_to_areas(areas: list[AreaDef]) -> dict[str, list[AreaDef]]:
+    """Invert area trays/penetrations: node_key → areas that contain it."""
+    index: dict[str, list[AreaDef]] = {}
+    for area in areas:
+        for node in area.nodes:
+            key = node_key(node)
+            if not key:
+                continue
+            bucket = index.get(key)
+            if bucket is None:
+                index[key] = [area]
+            elif area not in bucket:
+                bucket.append(area)
+    return index
 
 
 def ordered_summaries(
@@ -762,14 +855,42 @@ def summarize_all_areas(
     as_of: date | None = None,
     priority_map: dict[str, int] | None = None,
     only_with_data: bool = True,
+    apply_schedule: bool = True,
 ) -> list[dict]:
+    """
+    One-pass over cables: parse each Pfad once, map nodes → areas, classify
+    only intersecting rooms. Then optionally run the shared-pool scheduler.
+    """
     installed_by_area = installed_by_area or {}
     visible = areas_with_data(areas) if only_with_data else list(areas)
+    by_key = {a.key: a for a in visible}
+    infos_by_key: dict[str, list[tuple[pd.Series, dict]]] = {a.key: [] for a in visible}
+    node_index = build_node_to_areas(visible)
+
+    if df is not None and not df.empty and node_index:
+        for _, row in df.iterrows():
+            pfad = row.get("Pfad") if hasattr(row, "get") else None
+            nodes, distances = parse_route("" if _blank(pfad) else str(pfad))
+            if not nodes:
+                continue
+            hit_areas: list[AreaDef] = []
+            seen_area: set[str] = set()
+            for token in nodes:
+                for area in node_index.get(node_key(token), ()):
+                    if area.key in seen_area:
+                        continue
+                    seen_area.add(area.key)
+                    hit_areas.append(area)
+            for area in hit_areas:
+                info = classify_cable_in_area(row, area, nodes=nodes, distances=distances)
+                if info is not None:
+                    infos_by_key[area.key].append((row, info))
+
     summaries = [
-        summarize_area(
-            area,
-            df,
-            installed_stuetzen=installed_by_area.get(area.key, ()),
+        _aggregate_area_summary(
+            by_key[key],
+            infos_by_key[key],
+            installed_stuetzen=installed_by_area.get(key, ()),
             thin_pace=thin_pace,
             thick_pace=thick_pace,
             h_per_stuetze=h_per_stuetze,
@@ -778,17 +899,19 @@ def summarize_all_areas(
             max_per_room=max_per_room,
             as_of=as_of,
         )
-        for area in visible
+        for key in infos_by_key
     ]
-    schedule_areas(
-        summaries,
-        pullers=pullers,
-        max_per_room=max_per_room,
-        hours_per_week=hours_per_week,
-        as_of=as_of,
-        priority_map=priority_map,
-    )
-    return ordered_summaries(summaries, priority_map)
+    if apply_schedule:
+        schedule_areas(
+            summaries,
+            pullers=pullers,
+            max_per_room=max_per_room,
+            hours_per_week=hours_per_week,
+            as_of=as_of,
+            priority_map=priority_map,
+        )
+        return ordered_summaries(summaries, priority_map)
+    return summaries
 
 
 def cables_hitting_nodes(df: pd.DataFrame, nodes: Iterable[str]) -> set[str]:
@@ -823,6 +946,28 @@ def remaining_cable_ids(summary: dict, *, min_remaining_m: float = 0.0) -> list[
         seen.add(kid)
         out.append(kid)
     return out
+
+
+def area_cables_frame(summary: dict, df: pd.DataFrame) -> pd.DataFrame:
+    """Joined-cable rows for every cable that hits this area."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    ids = [str(x) for x in (summary.get("cable_ids") or []) if x]
+    if not ids:
+        return df.iloc[0:0].copy()
+    id_col = "Kabelnr" if "Kabelnr" in df.columns else None
+    if id_col is None:
+        return df.iloc[0:0].copy()
+    wanted = set(ids)
+    part = df[df[id_col].astype(str).isin(wanted)].copy()
+    order = {kid: i for i, kid in enumerate(ids)}
+    part["_area_ord"] = part[id_col].astype(str).map(lambda k: order.get(k, 10**9))
+    part = part.sort_values("_area_ord").drop(columns=["_area_ord"]).reset_index(drop=True)
+    rem_map = {str(info["kabelnr"]): info for _row, info in (summary.get("cable_infos") or [])}
+    part["Area_remaining_m"] = part[id_col].astype(str).map(
+        lambda k: float(rem_map.get(k, {}).get("remaining_m") or 0.0)
+    )
+    return part
 
 
 def remaining_cables_frame(summary: dict, df: pd.DataFrame, *, min_remaining_m: float = 0.0) -> pd.DataFrame:

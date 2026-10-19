@@ -7,6 +7,7 @@ from apps.api.db import get_db
 from apps.api.deps import require_roles
 from apps.api.models import Dataset, User
 from apps.api.services import dataset as ds
+from apps.api.services.areas_cache import clear_areas_cache
 
 router = APIRouter(prefix="/dataset", tags=["dataset"])
 
@@ -59,6 +60,7 @@ async def upload_dataset(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse files: {exc}") from exc
+    clear_areas_cache()
     payload = ds.dataset_payload(db, row)
     return payload
 
@@ -70,4 +72,5 @@ def clear_dataset(
 ):
     db.query(Dataset).delete()
     db.commit()
+    clear_areas_cache()
     return {"ok": True}
