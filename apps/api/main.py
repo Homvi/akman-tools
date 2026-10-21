@@ -16,6 +16,7 @@ from apps.api.routers import (
     errors,
     export,
     ids,
+    near_complete,
     progress,
     routes,
     stichmass,
@@ -54,6 +55,7 @@ app.include_router(cables.router)
 app.include_router(export.router)
 app.include_router(errors.router)
 app.include_router(stopped.router)
+app.include_router(near_complete.router)
 app.include_router(stutzen.router)
 app.include_router(ids.router)
 app.include_router(calculator.router)

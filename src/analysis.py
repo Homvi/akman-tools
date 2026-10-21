@@ -92,6 +92,17 @@ def started_cables(df: pd.DataFrame) -> pd.DataFrame:
     return out[out["Pull_status"].eq(PULL_PARTIAL)]
 
 
+def near_complete_cables(df: pd.DataFrame, *, max_remaining_m: float = 15.0) -> pd.DataFrame:
+    """Partially pulled cables with Remaining_m in (0, max_remaining_m]."""
+    out = assign_pull_status(df)
+    if out.empty or "Remaining_m" not in out.columns:
+        return out.iloc[0:0].copy()
+    rem = pd.to_numeric(out["Remaining_m"], errors="coerce")
+    mask = out["Pull_status"].eq(PULL_PARTIAL) & rem.gt(0) & rem.le(float(max_remaining_m))
+    cols = [c for c in ("Remaining_m", "Kabelnr") if c in out.columns]
+    return out.loc[mask].sort_values(cols, kind="mergesort").reset_index(drop=True)
+
+
 def _liste_is(series: pd.Series, wanted: str) -> pd.Series:
     want = str(wanted).strip().lstrip("0") or "0"
     text = series.astype("string").str.strip()

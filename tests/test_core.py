@@ -737,6 +737,26 @@ def test_stutzen_pull_status_filter_and_export_columns():
     assert fully_slim.iloc[0]["Megállítások"] == ""
 
 
+def test_near_complete_cables():
+    from src.analysis import PULL_NOT, PULL_PARTIAL, PULL_YES, near_complete_cables
+
+    df = pd.DataFrame(
+        {
+            "Kabelnr": ["a", "b", "c", "d", "e"],
+            "Pull_status": [PULL_PARTIAL, PULL_PARTIAL, PULL_PARTIAL, PULL_YES, PULL_NOT],
+            "Remaining_m": [10.0, 15.0, 20.0, 5.0, 8.0],
+            "Length_m": [100.0, 50.0, 80.0, 40.0, 30.0],
+            "Total_teilgezogene_meter": [90.0, 35.0, 60.0, 40.0, 0.0],
+        }
+    )
+    near = near_complete_cables(df, max_remaining_m=15.0)
+    assert list(near["Kabelnr"]) == ["a", "b"]
+    assert round(float(near["Remaining_m"].sum()), 1) == 25.0
+    assert near_complete_cables(df, max_remaining_m=9.0).empty
+    wider = near_complete_cables(df, max_remaining_m=20.0)
+    assert list(wider["Kabelnr"]) == ["a", "b", "c"]
+
+
 def test_partial_length_calculator():
     from src.length_calc import calculate_pulled_length, format_meters
 
