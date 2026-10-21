@@ -16,9 +16,11 @@ from src.length_calc import (
     latest_pull_ends,
     parse_route,
 )
+from src.ids import join_key, normalize_kabel_id
 from src.stutzen_filter import cable_route
 
-_SPLIT = re.compile(r"[,;\s]+")
+# Comma is part of Kabelnr (Excel decimal sub-id: 2114,1) — never a separator.
+_SPLIT = re.compile(r"[;\s]+")
 
 
 def _text(value) -> str:
@@ -56,6 +58,10 @@ def _fmt_date(value) -> str | None:
 
 
 def parse_cable_ids(raw: str | list[str] | None) -> list[str]:
+    """Split pasted IDs on semicolon / whitespace / newlines — not on commas.
+
+    Kabelnr values like ``2114,1`` (or ``2114.1``) stay one token.
+    """
     if raw is None:
         return []
     if isinstance(raw, list):
@@ -65,7 +71,10 @@ def parse_cable_ids(raw: str | list[str] | None) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for part in parts:
-        id_ = str(part or "").strip()
+        token = str(part or "").strip().strip(",")
+        if not token:
+            continue
+        id_ = normalize_kabel_id(token) or token
         if not id_ or id_ in seen:
             continue
         seen.add(id_)
@@ -82,6 +91,17 @@ def find_cable(df: pd.DataFrame, kabelnr: str) -> pd.Series | None:
     frame = assign_pull_status(df)
     keys = frame["Kabelnr"].astype(str).str.strip()
     hits = frame[keys == needle]
+    if hits.empty:
+        needle_norm = normalize_kabel_id(needle) or needle
+        hits = frame[keys == needle_norm]
+    if hits.empty:
+        needle_jk = join_key(needle)
+        if needle_jk:
+            if "join_key" in frame.columns:
+                jk = frame["join_key"].astype(str)
+            else:
+                jk = keys.map(join_key)
+            hits = frame[jk == needle_jk]
     if hits.empty:
         hits = frame[keys.str.lstrip("0") == needle.lstrip("0")]
     if hits.empty:

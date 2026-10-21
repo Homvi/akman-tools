@@ -217,7 +217,7 @@ export default function DashboardPage() {
     e.preventDefault();
     const raw = query.trim();
     if (!raw) {
-      setSearchError("Add meg a kábelszámot (többet vesszővel).");
+      setSearchError("Add meg a kábelszámot (többet pontosvesszővel vagy soronként).");
       setCables([]);
       setMissing([]);
       return;
@@ -396,7 +396,9 @@ export default function DashboardPage() {
             Excel
           </Button>
         </form>
-        <p className="mt-2 text-xs text-[#52525B]">Több kábelszám vesszővel, pontosvesszővel vagy szóközzel.</p>
+        <p className="mt-2 text-xs text-[#52525B]">
+          Több kábelszám: pontosvessző, szóköz vagy új sor. A vessző a szám része (pl. 2114,1).
+        </p>
         {searchError && <p className="mt-3 text-sm text-[#F87171]">{searchError}</p>}
         {missing.length > 0 && cables.length > 0 && (
           <p className="mt-3 text-sm text-[#F97316]">Nem található: {missing.join(", ")}</p>

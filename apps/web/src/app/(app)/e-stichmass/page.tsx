@@ -107,12 +107,12 @@ export default function EStichmassPage() {
           />
         </label>
         <label className="min-w-[280px] flex-1 text-xs text-[#71717A]">
-          Kábel ID-k (vessző / sor)
+          Kábel ID-k (pontosvessző / sor; vessző = rész-ID)
           <textarea
             className="mt-1 min-h-[72px] w-full rounded-md border border-[#27272A] bg-[#0C0C0E] px-3 py-2 font-mono-data text-sm text-[#FAFAFA] outline-none focus:border-[#2DD4BF]/50"
             value={idsText}
             onChange={(e) => setIdsText(e.target.value)}
-            placeholder="12345, 67890"
+            placeholder={"12345; 2114,1\n67890"}
             required
           />
         </label>
