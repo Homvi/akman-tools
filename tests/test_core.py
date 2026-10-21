@@ -281,6 +281,28 @@ def test_parse_join_filters_and_stops():
     assert round(float(hrs.loc[hrs["KW"].eq("KW36 2026"), "Hours"].iloc[0]), 1) == 30.0
     assert round(float(hrs.loc[hrs["KW"].eq("KW37 2026"), "Hours"].iloc[0]), 1) == 5.0
 
+    from src.progress import build_anschluss_events, weekly_anschluss
+
+    anschluss_df = pd.DataFrame(
+        {
+            "Kabelnr": ["1", "2", "3"],
+            "Thickness": ["Thick", "Thin", "Thin"],
+            "Anschluss_1": [pd.Timestamp("2026-09-01"), pd.Timestamp("2026-09-01"), None],
+            "Anschluss_2": [None, pd.Timestamp("2026-09-08"), pd.Timestamp("2026-09-08")],
+        }
+    )
+    a_events = build_anschluss_events(anschluss_df)
+    assert len(a_events) == 4
+    a_weekly = weekly_anschluss(a_events)
+    kw36 = a_weekly.loc[a_weekly["KW"].eq("KW36 2026")].iloc[0]
+    assert int(kw36["Thick"]) == 1
+    assert int(kw36["Thin"]) == 1
+    assert int(kw36["Total"]) == 2
+    kw37 = a_weekly.loc[a_weekly["KW"].eq("KW37 2026")].iloc[0]
+    assert int(kw37["Thick"]) == 0
+    assert int(kw37["Thin"]) == 2
+    assert int(kw37["Total"]) == 2
+
     loc_cables = cables_at_location(joined, stops, "3EDH407")
     assert list(loc_cables["join_key"]) == ["2"]
     assert loc_cables.iloc[0]["_block"][0][0] == "0002 (E) K3"

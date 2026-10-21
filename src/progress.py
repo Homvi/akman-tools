@@ -201,3 +201,78 @@ def progress_stats(events: pd.DataFrame, daily: pd.DataFrame) -> dict:
 
 def _empty_events() -> pd.DataFrame:
     return pd.DataFrame(columns=["Date", "Meters", "Kind", "Kabelnr"])
+
+
+def _thickness_label(value) -> str:
+    text = str(value or "").strip().casefold()
+    if text == "thick":
+        return "Thick"
+    if text == "thin":
+        return "Thin"
+    return "Unknown"
+
+
+def _anschluss_value(cable: pd.Series, col: str):
+    if col in cable.index:
+        return cable.get(col)
+    alt = col.replace("_", " ")
+    if alt in cable.index:
+        return cable.get(alt)
+    return None
+
+
+def build_anschluss_events(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per dated Anschluss (1=A, 2=E), with cable Thickness."""
+    empty = pd.DataFrame(columns=["Date", "Thickness", "Side", "Kabelnr"])
+    if df is None or df.empty:
+        return empty
+
+    rows: list[dict] = []
+    for _, cable in df.iterrows():
+        kabelnr = cable.get("Kabelnr")
+        thickness = _thickness_label(cable.get("Thickness"))
+        for side, col in (("A", "Anschluss_1"), ("E", "Anschluss_2")):
+            when = _event_timestamp(_anschluss_value(cable, col))
+            if when is None:
+                continue
+            rows.append(
+                {
+                    "Date": when,
+                    "Thickness": thickness,
+                    "Side": side,
+                    "Kabelnr": kabelnr,
+                }
+            )
+    if not rows:
+        return empty
+    return pd.DataFrame(rows).sort_values(["Date", "Thickness", "Kabelnr"]).reset_index(drop=True)
+
+
+def weekly_anschluss(events: pd.DataFrame) -> pd.DataFrame:
+    """Count Anschluss events per ISO week, split by Thick / Thin / Unknown."""
+    empty = pd.DataFrame(columns=["Year", "Week", "KW", "Start", "End", "Thick", "Thin", "Unknown", "Total"])
+    if events is None or events.empty or "Date" not in events.columns:
+        return empty
+    out = events.copy()
+    out["Date"] = pd.to_datetime(out["Date"])
+    out["Thickness"] = out.get("Thickness", pd.Series(dtype=str)).map(_thickness_label)
+    iso = out["Date"].dt.isocalendar()
+    out["Year"] = iso.year.astype(int)
+    out["Week"] = iso.week.astype(int)
+    out["KW"] = ["KW" + f"{int(week):02d} {int(year)}" for year, week in zip(out["Year"], out["Week"])]
+    pivot = (
+        out.groupby(["Year", "Week", "KW", "Thickness"], as_index=False)
+        .size()
+        .rename(columns={"size": "Count"})
+        .pivot(index=["Year", "Week", "KW"], columns="Thickness", values="Count")
+    )
+    for col in ("Thick", "Thin", "Unknown"):
+        if col not in pivot.columns:
+            pivot[col] = 0
+    pivot = pivot.fillna(0).astype(int)
+    bounds = out.groupby(["Year", "Week", "KW"], as_index=False).agg(Start=("Date", "min"), End=("Date", "max"))
+    grouped = pivot.reset_index().merge(bounds, on=["Year", "Week", "KW"], how="left")
+    grouped["Total"] = grouped["Thick"] + grouped["Thin"] + grouped["Unknown"]
+    return grouped.sort_values(["Year", "Week"]).reset_index(drop=True)[
+        ["Year", "Week", "KW", "Start", "End", "Thick", "Thin", "Unknown", "Total"]
+    ]
