@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
 export function DataTable({
@@ -18,8 +19,9 @@ export function DataTable({
   onRowClick?: (row: Record<string, unknown>, index: number) => void;
   renderExpanded?: (row: Record<string, unknown>, index: number) => ReactNode;
 }) {
+  const t = useTranslations("common");
   if (!rows.length) {
-    return <p className="text-sm text-[#71717A]">No rows.</p>;
+    return <p className="text-sm text-[#71717A]">{t("noRows")}</p>;
   }
   const cols = columns || Object.keys(rows[0]).slice(0, 12);
   return (

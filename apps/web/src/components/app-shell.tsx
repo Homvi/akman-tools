@@ -1,27 +1,29 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Menu, X } from "lucide-react";
+import { Link, usePathname } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TopProgress } from "@/components/progress-bar";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
-const NAV = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/devices", label: "Device list" },
-  { href: "/stopped", label: "Stopped" },
-  { href: "/stutzen", label: "Stützen / Bahn" },
-  { href: "/areas", label: "Areas" },
-  { href: "/workforce", label: "Workforce" },
-  { href: "/routes", label: "Routes" },
-  { href: "/progress", label: "Progress" },
-  { href: "/errors", label: "Hibák" },
-  { href: "/calculator", label: "Calculator" },
-  { href: "/e-stichmass", label: "E-Stichmaß" },
-  { href: "/upload", label: "Upload" },
-  { href: "/guide", label: "Guide" },
+const NAV_KEYS = [
+  { href: "/dashboard", key: "dashboard" as const },
+  { href: "/devices", key: "devices" as const },
+  { href: "/stopped", key: "stopped" as const },
+  { href: "/near-complete", key: "nearComplete" as const },
+  { href: "/stutzen", key: "stutzen" as const },
+  { href: "/areas", key: "areas" as const },
+  { href: "/workforce", key: "workforce" as const },
+  { href: "/routes", key: "routes" as const },
+  { href: "/progress", key: "progress" as const },
+  { href: "/errors", key: "errors" as const },
+  { href: "/calculator", key: "calculator" as const },
+  { href: "/e-stichmass", key: "stichmass" as const },
+  { href: "/upload", key: "upload" as const },
+  { href: "/guide", key: "guide" as const },
 ];
 
 export function AppShell({
@@ -35,12 +37,13 @@ export function AppShell({
   loading?: boolean;
   onLogout?: () => void;
 }) {
+  const t = useTranslations("nav");
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   const NavLinks = (
     <nav className="flex flex-col gap-1">
-      {NAV.map((item) => (
+      {NAV_KEYS.map((item) => (
         <Link
           key={item.href}
           href={item.href}
@@ -54,7 +57,7 @@ export function AppShell({
                 : "text-[#A1A1AA] hover:bg-[#18181B] hover:text-[#FAFAFA]"
           )}
         >
-          {item.label}
+          {t(item.key)}
         </Link>
       ))}
     </nav>
@@ -66,7 +69,7 @@ export function AppShell({
       <div className="mx-auto flex min-h-screen max-w-[1400px]">
         <aside className="hidden w-56 shrink-0 border-r border-[#27272A] bg-[#0C0C0E] p-4 md:block">
           <div className="mb-6">
-            <div className="text-lg font-semibold tracking-tight text-[#FAFAFA]">Cable installation</div>
+            <div className="text-lg font-semibold tracking-tight text-[#FAFAFA]">{t("brand")}</div>
             <p className="mt-1 text-xs text-[#71717A]">
               {status?.loaded && status.progressAsOf ? (
                 <span className="text-[#2DD4BF]">{status.progressAsOf}</span>
@@ -78,15 +81,16 @@ export function AppShell({
               {status?.conflicts ? (
                 <>
                   {" "}
-                  · <span className="text-[#F97316]">{status.conflicts} conflicts</span>
+                  · <span className="text-[#F97316]">{t("conflicts", { count: status.conflicts })}</span>
                 </>
               ) : null}
             </p>
+            <LanguageSwitcher className="mt-3" />
           </div>
           {NavLinks}
           {onLogout && (
             <Button variant="outline" className="mt-6 w-full" onClick={onLogout}>
-              Log out
+              {t("logout")}
             </Button>
           )}
         </aside>
@@ -94,14 +98,17 @@ export function AppShell({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between border-b border-[#27272A] bg-[#0C0C0E] px-4 py-3 md:hidden">
             <div>
-              <div className="font-semibold">Cable installation</div>
+              <div className="font-semibold">{t("brand")}</div>
               <div className="text-xs text-[#71717A]">
                 {status?.loaded && status.progressAsOf ? status.progressAsOf : "—"}
               </div>
             </div>
-            <button type="button" onClick={() => setOpen((v) => !v)} aria-label="Menu" className="text-[#FAFAFA]">
-              {open ? <X size={20} /> : <Menu size={20} />}
-            </button>
+            <div className="flex items-center gap-3">
+              <LanguageSwitcher />
+              <button type="button" onClick={() => setOpen((v) => !v)} aria-label={t("menu")} className="text-[#FAFAFA]">
+                {open ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            </div>
           </header>
           {open && <div className="border-b border-[#27272A] bg-[#0C0C0E] p-4 md:hidden">{NavLinks}</div>}
           <main className="flex-1 p-4 md:p-6">{children}</main>

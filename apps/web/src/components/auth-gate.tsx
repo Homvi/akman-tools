@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/routing";
 import { api } from "@/lib/api";
 import { AppShell } from "@/components/app-shell";
 
@@ -9,6 +10,7 @@ type Me = { email: string; roles: string[] };
 type Dataset = { loaded: boolean; cable_count?: number; progress_as_of?: string | null };
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("common");
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -59,7 +61,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading || !me) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#09090B] text-sm text-[#71717A]">Loading…</div>
+      <div className="flex min-h-screen items-center justify-center bg-[#09090B] text-sm text-[#71717A]">
+        {t("loading")}
+      </div>
     );
   }
 

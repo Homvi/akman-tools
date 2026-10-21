@@ -1,5 +1,6 @@
-import { redirect } from "next/navigation";
+import { redirect } from "@/i18n/routing";
+import { routing } from "@/i18n/routing";
 
-export default function Home() {
-  redirect("/dashboard");
+export default function RootPage() {
+  redirect({ href: "/dashboard", locale: routing.defaultLocale });
 }
