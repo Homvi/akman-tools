@@ -93,38 +93,88 @@ def detect_month(raw: pd.DataFrame, sheet_name: str) -> int | None:
     return None
 
 
+_POSITION_HEADERS = {"position", "skill", "profesion", "profession"}
+_ABSENT_TOKENS = {
+    "h",
+    "holiday",
+    "sick",
+    "x",
+    "u",
+    "-",
+    "—",
+    "n/a",
+    "na",
+    "off",
+}
+
+# Cell mark for staffing UI (leave hints). Values stored in Status column.
+_LEAVE_TOKENS = {
+    "h",
+    "holiday",
+    "holidays",
+    "urlaub",
+    "szabadsag",
+    "szabadság",
+    "u",
+    "sz",
+    "leave",
+    "vacation",
+    "pto",
+}
+_SICK_TOKENS = {"sick", "beteg", "krank", "b", "s"}
+
+
+def _is_position_header(cell: str) -> bool:
+    key = cell.strip().lower()
+    return key in _POSITION_HEADERS or key.startswith("position")
+
+
 def _find_header_row(raw: pd.DataFrame) -> int | None:
     for i in range(min(12, len(raw))):
         cells = [_norm_text(v).lower() for v in raw.iloc[i].tolist()]
-        if "name" in cells and any(c == "position" or c.startswith("position") for c in cells):
+        if "name" in cells and any(_is_position_header(c) for c in cells if c):
             return i
     return None
 
 
-def is_present(value) -> bool:
-    """Numeric hours > 0 count as present. H / holiday / empty / 0 = not present."""
-    if value is None:
-        return False
+def cell_status(value) -> str:
+    """Classify a day cell: work | leave | sick | off | empty."""
+    if value is None or isinstance(value, bool):
+        return "empty"
     try:
         if pd.isna(value):
-            return False
+            return "empty"
     except (TypeError, ValueError):
         pass
     if isinstance(value, str):
-        text = value.strip()
+        text = value.replace("\xa0", " ").strip()
         if not text:
-            return False
+            return "empty"
+        lower = text.lower()
         upper = text.upper()
-        if upper in {"H", "HOLIDAY"} or "HOLIDAY" in upper:
-            return False
-        text = text.replace(",", ".")
+        if lower in _LEAVE_TOKENS or "HOLIDAY" in upper or "URLAUB" in upper or "SZABADS" in upper:
+            return "leave"
+        if lower in _SICK_TOKENS or "SICK" in upper or "KRANK" in upper:
+            return "sick"
+        if lower in _ABSENT_TOKENS or upper in {"H"}:
+            # H alone is leave (holiday); already caught above. Remaining tokens → off.
+            if upper == "H" or lower in {"h", "holiday"}:
+                return "leave"
+            return "off"
+        text_num = text.replace(",", ".")
         try:
-            return float(text) > 0
+            return "work" if float(text_num) > 0 else "off"
         except ValueError:
-            return False
-    if isinstance(value, (int, float)):
-        return float(value) > 0
-    return False
+            return "off"
+    try:
+        return "work" if float(value) > 0 else "off"
+    except (TypeError, ValueError):
+        return "off"
+
+
+def is_present(value) -> bool:
+    """Numeric hours > 0 count as present. H / holiday / empty / 0 = not present."""
+    return cell_status(value) == "work"
 
 
 def _is_person_row(name: str, position: str) -> bool:
@@ -138,37 +188,118 @@ def _is_person_row(name: str, position: str) -> bool:
     return True
 
 
-def _day_columns(header: pd.Series) -> list[tuple[int, int]]:
-    """Return list of (column_index, day_of_month)."""
-    out: list[tuple[int, int]] = []
-    for col, value in enumerate(header.tolist()):
-        text = _norm_text(value)
-        if not text:
-            continue
-        if text.lower().startswith("total"):
-            continue
+def _as_date(value) -> date | None:
+    """Parse header cell into a calendar date (full datetime or day-of-month helper)."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, pd.Timestamp):
+        if pd.isna(value):
+            return None
+        return value.date()
+    text = _norm_text(value)
+    if not text or text.lower().startswith("total") or text.lower() in {"gesamt", "id"}:
+        return None
+    # Full date strings: 2026-06-10 / 10.06.2026
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d", "%d/%m/%Y"):
         try:
-            day = int(float(str(text).replace(",", ".")))
+            return datetime.strptime(text[:10], fmt).date()
         except ValueError:
             continue
-        if 1 <= day <= 31:
-            out.append((col, day))
+    try:
+        ts = pd.to_datetime(text, dayfirst=True, errors="coerce")
+        if pd.notna(ts):
+            return pd.Timestamp(ts).date()
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _is_day_number(value) -> bool:
+    """True for plain day-of-month cells (1..31), not full dates."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return False
+    if isinstance(value, (int, float)):
+        try:
+            if pd.isna(value):
+                return False
+        except (TypeError, ValueError):
+            return False
+        return float(value).is_integer() and 1 <= int(value) <= 31
+    text = _norm_text(value)
+    if not text or text.lower().startswith("total") or text.lower() in {"gesamt"}:
+        return False
+    try:
+        num = float(text.replace(",", "."))
+    except ValueError:
+        return False
+    return num.is_integer() and 1 <= int(num) <= 31
+
+
+def _date_columns(header: pd.Series, *, year: int, month: int) -> list[tuple[int, date]]:
+    """Return list of (column_index, calendar date).
+
+    Supports:
+    - day-of-month integers (legacy sheets)
+    - full date / datetime headers (Arbeitsstunden Vorlage)
+    """
+    out: list[tuple[int, date]] = []
+    for col, value in enumerate(header.tolist()):
+        if _is_day_number(value):
+            day = int(float(str(value).replace(",", ".")))
+            try:
+                out.append((col, date(year, month, day)))
+            except ValueError:
+                continue
+            continue
+        full = _as_date(value)
+        if full is not None:
+            out.append((col, full))
     return out
+
+
+def _header_col(header: pd.Series, *names: str, default: int) -> int:
+    """Find column by header label; earlier *names win (e.g. Position before Profesion)."""
+    cells = [_norm_text(v).lower() for v in header.tolist()]
+    for name in names:
+        key = name.lower()
+        for i, cell in enumerate(cells):
+            if cell == key:
+                return i
+    for name in names:
+        key = name.lower()
+        for i, cell in enumerate(cells):
+            if cell.startswith(key):
+                return i
+    return default
+
+
+_EMPTY_COLS = ["Date", "Name", "Position", "Present", "Hours", "Status", "Sheet"]
 
 
 def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> pd.DataFrame:
     header_row = _find_header_row(raw)
     if header_row is None:
-        return pd.DataFrame(columns=["Date", "Name", "Position", "Present", "Hours", "Sheet"])
+        return pd.DataFrame(columns=_EMPTY_COLS)
 
     month = detect_month(raw, sheet_name) or date.today().month
     header = raw.iloc[header_row]
-    day_cols = _day_columns(header)
-    if not day_cols:
-        return pd.DataFrame(columns=["Date", "Name", "Position", "Present", "Hours", "Sheet"])
+    date_cols = _date_columns(header, year=year, month=month)
+    if not date_cols:
+        return pd.DataFrame(columns=_EMPTY_COLS)
 
-    name_col = next((i for i, v in enumerate(header.tolist()) if _norm_text(v).lower() == "name"), 1)
-    pos_col = next((i for i, v in enumerate(header.tolist()) if _norm_text(v).lower() == "position"), 2)
+    name_col = _header_col(header, "name", default=1)
+    pos_col = _header_col(header, "position", "skill", "profesion", "profession", default=2)
 
     rows: list[dict] = []
     for r in range(header_row + 1, len(raw)):
@@ -176,15 +307,12 @@ def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> p
         position = _norm_text(raw.iat[r, pos_col] if pos_col < raw.shape[1] else None)
         if not _is_person_row(name, position):
             continue
-        for col, day in day_cols:
+        for col, when in date_cols:
             if col >= raw.shape[1]:
                 continue
-            try:
-                when = date(year, month, day)
-            except ValueError:
-                continue
             cell = raw.iat[r, col]
-            present = is_present(cell)
+            status = cell_status(cell)
+            present = status == "work"
             hours = None
             if present:
                 try:
@@ -198,6 +326,7 @@ def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> p
                     "Position": position,
                     "Present": present,
                     "Hours": hours,
+                    "Status": status,
                     "Sheet": sheet_name,
                 }
             )

@@ -931,6 +931,65 @@ def test_workforce_headcount_and_positions():
     assert float(per_h.loc[per_h["Date"].eq("2026-09-01"), "Meters"].iloc[0]) == 20.0
 
 
+def test_workforce_vorlage_datetime_and_skill_headers():
+    """Arbeitsstunden Vorlage: datetime day headers + Skill / Profesion+Position."""
+    from openpyxl import Workbook
+
+    from src.workforce import is_present, parse_workforce_excel, unique_positions
+
+    assert not is_present("holiday")
+    assert not is_present("u")
+    assert not is_present("x")
+    assert not is_present("\xa0")
+
+    wb = Workbook()
+    # Sheet with datetime headers + Profesion (empty) before Position
+    june = wb.active
+    june.title = "June"
+    june.append(
+        [
+            None,
+            "Name",
+            "Last name",
+            "Profesion",
+            "Position",
+            datetime(2026, 6, 10),
+            datetime(2026, 6, 11),
+        ]
+    )
+    june.append([None, "Viktor Kondor", "Kondor", None, "Team lead", 10, "holiday"])
+    june.append([None, "Alice Puller", "Puller", None, "Cable puller", 9.5, 10])
+
+    # October-style: Skill + day-of-month integers
+    oct_ = wb.create_sheet("October")
+    oct_.append(["ID", "Name", "Skill", 1, 2, 3])
+    oct_.append([1, "Bob Iron", "Iron worker", 10, "u", "\xa0"])
+    oct_.append([2, "Cara Cable", "Cable puller", 10, 10, "x"])
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    df = parse_workforce_excel(buf, year=2026)
+    assert set(df["Name"]) == {"Viktor Kondor", "Alice Puller", "Bob Iron", "Cara Cable"}
+    assert "Team lead" in unique_positions(df)
+    assert "Iron worker" in unique_positions(df)
+
+    viktor = df.loc[df["Name"].eq("Viktor Kondor") & df["Date"].eq("2026-06-10")].iloc[0]
+    assert viktor["Present"] is True or bool(viktor["Present"])
+    assert viktor["Position"] == "Team lead"
+    assert float(viktor["Hours"]) == 10.0
+
+    viktor_h = df.loc[df["Name"].eq("Viktor Kondor") & df["Date"].eq("2026-06-11")].iloc[0]
+    assert not bool(viktor_h["Present"])
+
+    bob = df.loc[df["Name"].eq("Bob Iron") & df["Date"].eq("2026-10-01")].iloc[0]
+    assert bob["Position"] == "Iron worker"
+    assert bool(bob["Present"])
+    bob_u = df.loc[df["Name"].eq("Bob Iron") & df["Date"].eq("2026-10-02")].iloc[0]
+    assert not bool(bob_u["Present"])
+
+
 def _gesamt_xlsx_with_liste_separator() -> BytesIO:
     """New Kabelziehliste-style export with a Liste: section row between blocks."""
     wb = Workbook()
