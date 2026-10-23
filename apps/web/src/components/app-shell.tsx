@@ -17,6 +17,7 @@ const NAV_KEYS = [
   { href: "/stutzen", key: "stutzen" as const },
   { href: "/areas", key: "areas" as const },
   { href: "/workforce", key: "workforce" as const },
+  { href: "/teams", key: "teams" as const },
   { href: "/routes", key: "routes" as const },
   { href: "/progress", key: "progress" as const },
   { href: "/errors", key: "errors" as const },

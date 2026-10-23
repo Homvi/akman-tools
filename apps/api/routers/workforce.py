@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.config import settings
@@ -8,6 +11,7 @@ from apps.api.db import get_db
 from apps.api.deps import require_roles
 from apps.api.models import User
 from apps.api.services import dataset as ds
+from apps.api.services import workforce_board as board_svc
 from apps.api.services.jsonutil import records
 from src.progress import build_pull_events, daily_progress
 from src.workforce import (
@@ -22,6 +26,13 @@ from src.workforce import (
 router = APIRouter(prefix="/workforce", tags=["workforce"])
 
 _WF_PATH = "workforce.parquet"
+
+
+class BoardBody(BaseModel):
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    # Legacy fields accepted so old clients don't 422; normalize_board migrates/ignores them.
+    teams: list[dict[str, Any]] = Field(default_factory=list)
+    assignments: dict[str, str | None] = Field(default_factory=dict)
 
 
 @router.post("/upload")
@@ -69,3 +80,38 @@ def workforce_series(
         "m_per_person": records(m_person) if m_person is not None else [],
         "m_per_hour": records(m_hour) if m_hour is not None else [],
     }
+
+
+@router.get("/people")
+def workforce_people(
+    _: User = Depends(require_roles("planner", "admin", "worker")),
+):
+    frame = board_svc.load_workforce_frame()
+    if frame is None:
+        raise HTTPException(status_code=404, detail="No workforce data — upload the headcount Excel first")
+    people = board_svc.list_people(frame)
+    as_of = next((p.get("as_of") for p in people if p.get("as_of")), None)
+    on_leave = sum(1 for p in people if p.get("on_leave"))
+    return {
+        "people": people,
+        "positions": board_svc.unique_positions_from_people(people),
+        "count": len(people),
+        "as_of": as_of,
+        "on_leave_count": on_leave,
+        "available_count": len(people) - on_leave,
+    }
+
+
+@router.get("/board")
+def get_workforce_board(
+    _: User = Depends(require_roles("planner", "admin", "worker")),
+):
+    return board_svc.load_board()
+
+
+@router.put("/board")
+def put_workforce_board(
+    body: BoardBody,
+    _: User = Depends(require_roles("planner", "admin")),
+):
+    return board_svc.save_board(body.model_dump())
