@@ -23,9 +23,15 @@ def test_parse_cable_ids_keeps_comma_in_id():
     assert parse_cable_ids("2114.1") == ["2114,1"]
     assert parse_cable_ids("2114,1; 0006") == ["2114,1", "0006"]
     assert parse_cable_ids("2114,1\n0006") == ["2114,1", "0006"]
-    assert parse_cable_ids("2114,1 0006") == ["2114,1", "0006"]
+    # Space alone is NOT a separator — use semicolon between IDs.
+    assert parse_cable_ids("2114,1 0006") == ["2114,1 0006"]
     # Must NOT split a single sub-id on the comma
     assert parse_cable_ids("5012,1;5012,2") == ["5012,1", "5012,2"]
+    assert parse_cable_ids("5077,2") == ["5077,2"]
+    assert parse_cable_ids("5077, 2") == ["5077,2"]
+    assert parse_cable_ids("5077,2;5012,1") == ["5077,2", "5012,1"]
+    # Comma-only list without semicolon stays one token
+    assert parse_cable_ids("5077,2,5012") == ["5077,2,5012"]
 
 
 def test_find_cable_matches_comma_and_dot_forms():

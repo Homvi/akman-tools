@@ -90,8 +90,25 @@ def wrap_pathway(text, width: int = _PATH_WIDTH) -> str:
     return "\n".join(lines)
 
 
+def _is_blank_path_token(value) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return not text or text.lower() in {"nan", "<na>", "none", "nat"}
+
+
 def _path_text(row: list) -> str:
-    return " ".join(str(value).strip() for value in row if value is not None and str(value).strip())
+    parts = []
+    for value in row:
+        if _is_blank_path_token(value):
+            continue
+        parts.append(str(value).strip())
+    return " ".join(parts)
 
 
 def write_path_row(ws, row: int, text) -> None:
@@ -218,7 +235,7 @@ def _plain_path(row: pd.Series) -> str:
         if text:
             return " ".join(text.split())
     pfad = row.get("Pfad")
-    if pfad is None:
+    if _is_blank_path_token(pfad):
         return ""
     return " ".join(str(pfad).split())
 

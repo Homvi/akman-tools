@@ -39,6 +39,7 @@ def test_length_summary_split():
     assert summary["total_length_m"] == 190.0
     assert summary["fully_pulled_m"] == 100.0
     assert summary["partially_pulled_m"] == 20.0
+    assert summary["not_started_m"] == 40.0
     assert summary["pulled_total_m"] == 120.0
 
 
@@ -179,3 +180,53 @@ def test_cable_complete_shows_verlegt_date():
     assert detail["verlegt_date"] == "12.08.2026"
     assert detail["status_message"] == "Behúzva: 12.08.2026"
     assert "Teljesen leadva" not in detail["status_message"]
+    assert detail["route_missing"] is False
+    assert detail["route_warning"] == ""
+
+
+def test_cable_complete_missing_pfad_no_nan_feedback():
+    df = pd.DataFrame(
+        [
+            {
+                "Kabelnr": "4012",
+                "Pfad": float("nan"),
+                "verlegt": "29.08.2026",
+                "Pulled": True,
+                "Length_m": 46.0,
+                "Liste": "0020",
+                "Geraet_A": "61 Schottel Switchboard PU1",
+                "Geraet_E": "137 Schottel Drive Motor PU 1",
+            }
+        ]
+    )
+    detail = cable_detail(find_cable(df, "4012"))
+    assert detail["status"] == "complete"
+    assert detail["verlegt_date"] == "29.08.2026"
+    assert detail["route_missing"] is True
+    assert "Pfad" in detail["route_warning"]
+    assert detail["route"] == ""
+    assert detail["route_html"] == ""
+    assert detail["pulled_start"] == ""
+    assert detail["pulled_end"] == ""
+    assert detail["nodes"] == []
+    assert "nan" not in detail["status_message"].lower()
+    assert "Pfad" in detail["status_message"]
+    assert detail["status_label"] == "Teljesen behúzva"
+
+
+def test_cable_complete_string_nan_pfad_treated_as_missing():
+    df = pd.DataFrame(
+        [
+            {
+                "Kabelnr": "4013",
+                "Pfad": "nan",
+                "verlegt": "01.09.2026",
+                "Length_m": 10.0,
+            }
+        ]
+    )
+    detail = cable_detail(find_cable(df, "4013"))
+    assert detail["status"] == "complete"
+    assert detail["route_missing"] is True
+    assert detail["pulled_start"] == ""
+    assert "nan" not in (detail.get("route") or "").lower()

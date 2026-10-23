@@ -42,7 +42,7 @@ def get_filter_options(
 def lookup_cables(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("planner", "admin", "worker")),
-    ids: str = Query(..., description="Comma-separated Kabelnr list"),
+    ids: str = Query(..., description="Semicolon-separated Kabelnr list"),
 ):
     id_list = parse_cable_ids(ids)
     if not id_list:

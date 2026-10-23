@@ -5,7 +5,9 @@ import re
 import pandas as pd
 
 _SUFFIX = re.compile(r"\s*\(([ES])\)\s*(K\d+)?\s*$", re.IGNORECASE)
-_SPLIT_IDS = re.compile(r"[;\n]+")
+# Semicolon / newline only — comma is part of Kabelnr (e.g. 5012,1).
+SPLIT_CABLE_IDS = re.compile(r"[;\n]+")
+_SPLIT_IDS = SPLIT_CABLE_IDS  # alias for older call sites
 
 
 def normalize_kabel_id(value) -> str:
@@ -23,6 +25,8 @@ def normalize_kabel_id(value) -> str:
 
     text = _SUFFIX.sub("", text).strip()
     text = re.sub(r"\.(\d+)$", r",\1", text)
+    # Sub-id may be typed with a space after the comma (5077, 2 → 5077,2).
+    text = re.sub(r",\s*", ",", text)
     return text
 
 
@@ -44,7 +48,8 @@ def _strip_zeros(token: str) -> str:
 
 def parse_cable_id_list(text, *, dedupe: bool = True) -> list[str]:
     """
-    Parse semicolon / newline / comma-separated cable IDs.
+    Parse semicolon- or newline-separated cable IDs.
+    Comma is part of the Kabelnr (e.g. 5012,1) — never a list separator.
     Keeps input order; 5012.1 and 5012,1 become the same join_key.
     When dedupe=True (default), first occurrence wins.
     """
