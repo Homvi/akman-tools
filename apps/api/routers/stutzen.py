@@ -10,6 +10,7 @@ from apps.api.deps import require_roles
 from apps.api.models import User
 from apps.api.services import dataset as ds
 from apps.api.services.filters import paginate
+from src.pull_cards_pdf import build_pull_cards_pdf
 from src.stutzen_filter import (
     DEFAULT_EXPORT_COLUMNS,
     export_column_catalog,
@@ -43,7 +44,16 @@ class StutzenExportBody(BaseModel):
     columns: list[str] = Field(default_factory=lambda: list(DEFAULT_EXPORT_COLUMNS))
 
 
-def _filtered_hits(db: Session, body: StutzenBody | StutzenExportBody):
+class StutzenPullCardsBody(BaseModel):
+    nodes_text: str
+    unique_only: bool = True
+    mode: str = "AND"
+    statuses: list[str] = Field(default_factory=list)
+    filter_note: str = ""
+    lang: str = "en"
+
+
+def _filtered_hits(db: Session, body: StutzenBody | StutzenExportBody | StutzenPullCardsBody):
     frame = ds.load_joined(db)
     if frame is None:
         raise HTTPException(status_code=404, detail="No dataset loaded")
@@ -95,4 +105,32 @@ def stutzen_export(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@router.post("/pull-cards")
+def stutzen_pull_cards(
+    body: StutzenPullCardsBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("planner", "admin")),
+):
+    nodes, _hits, filtered, _status_counts, _thick_counts = _filtered_hits(db, body)
+    if filtered.empty:
+        raise HTTPException(status_code=404, detail="No matching cables")
+    note = (body.filter_note or "").strip()
+    if not note:
+        note = f"{', '.join(nodes)} ({body.mode})"
+    lang = (body.lang or "en").strip().lower()
+    if lang not in {"en", "hu", "de"}:
+        lang = "en"
+    data = build_pull_cards_pdf(
+        filtered,
+        filter_note=note,
+        lang=lang,
+        highlight_nodes=nodes,
+    )
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="stutzen_pull_cards.pdf"'},
     )

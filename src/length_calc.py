@@ -537,3 +537,89 @@ def stichmass_from_stuetze_to_a(
     if not node_a:
         return CalcResult(False, error="Hiba: A-vég (Knoten_A) nem található!")
     return calculate_pulled_length(route, node_a, float(aln_a or 0), node_a, 0.0, stuetze, node_a)
+
+
+def stichmass_from_stuetze_to_e(
+    route: str,
+    stuetze: str,
+    node_e: str,
+    aln_e: float = 0.0,
+) -> CalcResult:
+    """Stichmaß: distance from Stütze to E-end (Knoten_E) plus Aln_E when E is on the span."""
+    route = str(route or "").strip()
+    stuetze = str(stuetze or "").strip()
+    node_e = str(node_e or "").strip()
+    if not route or not stuetze:
+        return CalcResult(False, error="Hiba: Nyomvonal és Stütze megadása kötelező!")
+    if not node_e:
+        nodes, _ = parse_route(route)
+        node_e = nodes[-1] if nodes else ""
+    if not node_e:
+        return CalcResult(False, error="Hiba: E-vég (Knoten_E) nem található!")
+    return calculate_pulled_length(route, node_e, 0.0, node_e, float(aln_e or 0), stuetze, node_e)
+
+
+def _nearest_stuetze_along(nodes: list[str], from_idx: int, toward_idx: int) -> str | None:
+    """First EDH/EDV from from_idx walking toward toward_idx (inclusive)."""
+    from src.pathways import is_stuetze
+
+    if not nodes or from_idx is None or toward_idx is None:
+        return None
+    if from_idx < 0 or toward_idx < 0 or from_idx >= len(nodes) or toward_idx >= len(nodes):
+        return None
+    step = 1 if toward_idx >= from_idx else -1
+    i = from_idx
+    while True:
+        if is_stuetze(nodes[i]):
+            return nodes[i]
+        if i == toward_idx:
+            break
+        i += step
+    return None
+
+
+def nearest_end_stichmass(
+    route: str,
+    *,
+    end: str = "A",
+    node_a: str = "",
+    node_e: str = "",
+    aln_a: float = 0.0,
+    aln_e: float = 0.0,
+) -> tuple[str, CalcResult]:
+    """Nearest EDH/EDV from A (toward E) or E (toward A), with Stichmaß including Aln.
+
+    Returns (stuetze_name, CalcResult). stuetze_name is empty on failure.
+    """
+    route = str(route or "").strip()
+    nodes, _ = parse_route(route)
+    if not nodes:
+        return "", CalcResult(False, error="Hiba: Üres nyomvonal!")
+
+    side = str(end or "A").strip().upper()
+    na = str(node_a or "").strip() or nodes[0]
+    ne = str(node_e or "").strip() or nodes[-1]
+    idx_a = _node_index(nodes, na)
+    idx_e = _node_index(nodes, ne)
+    if idx_a is None:
+        idx_a = 0
+    if idx_e is None:
+        idx_e = len(nodes) - 1
+
+    if side == "E":
+        stuetze = _nearest_stuetze_along(nodes, idx_e, idx_a)
+        if not stuetze:
+            return "", CalcResult(False, error="Hiba: Nincs EDH/EDV a nyomvonalon az E-vég felől!")
+        return stuetze, stichmass_from_stuetze_to_e(route, stuetze, ne, float(aln_e or 0))
+
+    stuetze = _nearest_stuetze_along(nodes, idx_a, idx_e)
+    if not stuetze:
+        return "", CalcResult(False, error="Hiba: Nincs EDH/EDV a nyomvonalon az A-vég felől!")
+    return stuetze, stichmass_from_stuetze_to_a(route, stuetze, na, float(aln_a or 0))
+
+
+def format_stichmass_label(stuetze: str, result: CalcResult) -> str:
+    """e.g. '3E4006 : 2,1 m'"""
+    if not stuetze or not result.ok:
+        return ""
+    return f"{stuetze} : {format_meters(result.meters)}"

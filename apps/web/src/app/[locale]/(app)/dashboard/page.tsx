@@ -19,6 +19,8 @@ type CableRouteDetail = {
   status_message: string;
   route_html: string;
   route: string;
+  route_missing?: boolean;
+  route_warning?: string;
   pulled_start: string;
   pulled_end: string;
 };
@@ -31,6 +33,7 @@ type Summary = {
   total_length_m?: number;
   fully_pulled_m?: number;
   partially_pulled_m?: number;
+  not_started_m?: number;
   pulled_total_m?: number;
   wired_not_verlegt?: string[];
   anschluss_without_verlegt?: AnschlussOpen[];
@@ -54,6 +57,8 @@ type CableDetail = {
   stop_date?: string | null;
   route: string;
   route_html: string;
+  route_missing?: boolean;
+  route_warning?: string;
   pulled_start: string;
   pulled_end: string;
   length_m: number | null;
@@ -124,7 +129,7 @@ function CableCard({ cable }: { cable: CableDetail }) {
         </div>
       </div>
 
-      {(cable.pulled_start || cable.pulled_end) && cable.status !== "none" && (
+      {(cable.pulled_start || cable.pulled_end) && cable.status !== "none" && !cable.route_missing && (
         <p className="text-sm text-[#71717A]">
           {tc("pulledSpan")}{" "}
           <span className="font-mono-data text-[#FAFAFA]">
@@ -135,11 +140,19 @@ function CableCard({ cable }: { cable: CableDetail }) {
 
       <div>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[#71717A]">{tc("route")}</div>
-        <div
-          className="overflow-x-auto rounded-md border border-[#27272A] bg-[#09090B] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
-          dangerouslySetInnerHTML={{ __html: cable.route_html || cable.route }}
-        />
-        <p className="mt-2 text-xs text-[#52525B]">{tc("pulledHint")}</p>
+        {cable.route_missing ? (
+          <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
+            {cable.route_warning || tc("routeMissing")}
+          </p>
+        ) : (
+          <>
+            <div
+              className="overflow-x-auto rounded-md border border-[#27272A] bg-[#09090B] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
+              dangerouslySetInnerHTML={{ __html: cable.route_html || cable.route || "—" }}
+            />
+            <p className="mt-2 text-xs text-[#52525B]">{tc("pulledHint")}</p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -242,7 +255,7 @@ export default function DashboardPage() {
       setLastIds(raw);
       if (!data.cables.length) {
         setSearchError(
-          data.missing.length ? t("missing", { ids: data.missing.join(", ") }) : t("notFound")
+          data.missing.length ? t("missing", { ids: data.missing.join("; ") }) : t("notFound")
         );
       }
     } catch (err) {
@@ -271,6 +284,7 @@ export default function DashboardPage() {
                 fully: fmtM(summary.fully_pulled_m),
                 partial: fmtM(summary.partially_pulled_m),
                 pulled: fmtM(summary.pulled_total_m),
+                notStarted: fmtM(summary.not_started_m),
               })}
             </p>
             {anschlussTotal > 0 && (
@@ -333,7 +347,7 @@ export default function DashboardPage() {
                                 <p className="text-sm text-[#FAFAFA]">
                                   {detail.status_message || detail.status_label}
                                 </p>
-                                {(detail.pulled_start || detail.pulled_end) && (
+                                {(detail.pulled_start || detail.pulled_end) && !detail.route_missing && (
                                   <p className="text-xs text-[#A1A1AA]">
                                     {tc("pulledSpan")}{" "}
                                     <span className="font-mono-data text-[#FAFAFA]">
@@ -341,15 +355,23 @@ export default function DashboardPage() {
                                     </span>
                                   </p>
                                 )}
-                                <div
-                                  className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7"
-                                  dangerouslySetInnerHTML={{
-                                    __html: detail.route_html || detail.route || "—",
-                                  }}
-                                />
-                                <p className="text-xs text-[#71717A]">
-                                  {tc("pulledHint")}
-                                </p>
+                                {detail.route_missing ? (
+                                  <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
+                                    {detail.route_warning || tc("routeMissing")}
+                                  </p>
+                                ) : (
+                                  <>
+                                    <div
+                                      className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7"
+                                      dangerouslySetInnerHTML={{
+                                        __html: detail.route_html || detail.route || "—",
+                                      }}
+                                    />
+                                    <p className="text-xs text-[#71717A]">
+                                      {tc("pulledHint")}
+                                    </p>
+                                  </>
+                                )}
                               </div>
                             );
                           }}
@@ -402,7 +424,7 @@ export default function DashboardPage() {
         </p>
         {searchError && <p className="mt-3 text-sm text-[#F87171]">{searchError}</p>}
         {missing.length > 0 && cables.length > 0 && (
-          <p className="mt-3 text-sm text-[#F97316]">{t("missing", { ids: missing.join(", ") })}</p>
+          <p className="mt-3 text-sm text-[#F97316]">{t("missing", { ids: missing.join("; ") })}</p>
         )}
 
         <div className="mt-6 space-y-4">

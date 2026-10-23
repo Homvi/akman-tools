@@ -90,11 +90,12 @@ def progress_as_of(df: pd.DataFrame | None) -> dict:
 
 
 def length_summary(df: pd.DataFrame | None) -> dict:
-    """Catalogue total + fully/partially pulled meters."""
+    """Catalogue total + fully/partially pulled + not-started meters."""
     zero = {
         "total_length_m": 0.0,
         "fully_pulled_m": 0.0,
         "partially_pulled_m": 0.0,
+        "not_started_m": 0.0,
         "pulled_total_m": 0.0,
         "cable_count": 0,
     }
@@ -103,8 +104,10 @@ def length_summary(df: pd.DataFrame | None) -> dict:
     frame = assign_pull_status(df)
     total = safe_float(frame["Length_m"].fillna(0).sum()) if "Length_m" in frame.columns else 0.0
     fully = 0.0
+    not_started = 0.0
     if "Length_m" in frame.columns and "Pull_status" in frame.columns:
         fully = safe_float(frame.loc[frame["Pull_status"] == PULL_YES, "Length_m"].fillna(0).sum())
+        not_started = safe_float(frame.loc[frame["Pull_status"] == PULL_NOT, "Length_m"].fillna(0).sum())
     partial = 0.0
     if "Total_teilgezogene_meter" in frame.columns and "Pull_status" in frame.columns:
         partial = safe_float(
@@ -114,6 +117,7 @@ def length_summary(df: pd.DataFrame | None) -> dict:
         "total_length_m": total,
         "fully_pulled_m": fully,
         "partially_pulled_m": partial,
+        "not_started_m": not_started,
         "pulled_total_m": safe_float(fully + partial),
         "cable_count": int(len(frame)),
     }

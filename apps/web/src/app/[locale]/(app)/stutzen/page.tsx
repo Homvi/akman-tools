@@ -10,6 +10,7 @@ import { TopProgress } from "@/components/progress-bar";
 import { cn } from "@/lib/utils";
 
 type StatusKey = "not_started" | "started" | "fully_pulled";
+type CardLang = "en" | "hu" | "de";
 
 type StatusCounts = Record<StatusKey, number>;
 
@@ -38,6 +39,8 @@ type CableRouteDetail = {
   status_message: string;
   route_html: string;
   route: string;
+  route_missing?: boolean;
+  route_warning?: string;
   pulled_start: string;
   pulled_end: string;
 };
@@ -97,6 +100,9 @@ export default function StutzenPage() {
   const [areaKey, setAreaKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const [cardLang, setCardLang] = useState<CardLang>("en");
+  const [filterNote, setFilterNote] = useState("");
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [routeById, setRouteById] = useState<Record<string, CableRouteDetail | "loading" | "error">>({});
@@ -244,6 +250,37 @@ export default function StutzenPage() {
     }
   }
 
+  function defaultFilterNote() {
+    const statusLabels = statuses
+      .map((key) => statusOptions.find((o) => o.key === key)?.label || key)
+      .join(" + ");
+    const nodePart = nodes.length ? nodes.join("; ") : text.trim();
+    return [nodePart, mode, statusLabels].filter(Boolean).join(" · ");
+  }
+
+  async function exportPullCards() {
+    setPdfExporting(true);
+    setError("");
+    try {
+      await api.downloadPost(
+        "/stutzen/pull-cards",
+        {
+          nodes_text: text,
+          unique_only: true,
+          mode,
+          statuses,
+          filter_note: filterNote.trim() || defaultFilterNote(),
+          lang: cardLang,
+        },
+        "stutzen_pull_cards.pdf"
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : tc("exportFailed"));
+    } finally {
+      setPdfExporting(false);
+    }
+  }
+
   function insertFromArea(kind: AreaInsertKind) {
     if (!selectedArea) {
       setError(t("needArea"));
@@ -269,7 +306,7 @@ export default function StutzenPage() {
 
   return (
     <div>
-      <TopProgress show={loading || exporting} />
+      <TopProgress show={loading || exporting || pdfExporting} />
       <h1 className="mb-1 text-2xl font-semibold tracking-tight text-[#FAFAFA]">{t("title")}</h1>
       <div className="mb-4 space-y-2 text-sm leading-relaxed text-[#A1A1AA]">
         <p>{t("help1")}</p>
@@ -391,6 +428,42 @@ export default function StutzenPage() {
         <Button type="button" variant="ghost" onClick={() => setShowExportCols((v) => !v)}>
           {showExportCols ? t("hideCols") : t("exportCols")}
         </Button>
+      </div>
+
+      <div className="mb-4 rounded-md border border-[#27272A] bg-[#0C0C0E] p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-[#A1A1AA]">
+            {t("pullCardsLang")}
+            <select
+              className="h-9 rounded-md border border-[#27272A] bg-[#09090B] px-2 text-sm text-[#FAFAFA]"
+              value={cardLang}
+              onChange={(e) => setCardLang(e.target.value as CardLang)}
+            >
+              <option value="en">EN</option>
+              <option value="hu">HU</option>
+              <option value="de">DE</option>
+            </select>
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!nodes.length || pdfExporting}
+            onClick={() => void exportPullCards()}
+          >
+            <Download size={16} />
+            {t("pullCards")}
+          </Button>
+        </div>
+        <label className="block text-xs uppercase tracking-wide text-[#71717A]">
+          {t("filterNote")}
+          <textarea
+            className="mt-1 h-16 w-full rounded-md border border-[#27272A] bg-[#09090B] p-2 font-mono-data text-sm text-[#FAFAFA] placeholder:text-[#52525B]"
+            value={filterNote}
+            onChange={(e) => setFilterNote(e.target.value)}
+            placeholder={t("filterNotePlaceholder")}
+          />
+        </label>
+        <p className="mt-1 text-xs text-[#71717A]">{t("filterNoteHelp")}</p>
       </div>
 
       {showExportCols && (
@@ -521,7 +594,7 @@ export default function StutzenPage() {
             return (
               <div className="space-y-2">
                 <p className="text-sm text-[#FAFAFA]">{detail.status_message || detail.status_label}</p>
-                {(detail.pulled_start || detail.pulled_end) && (
+                {(detail.pulled_start || detail.pulled_end) && !detail.route_missing && (
                   <p className="text-xs text-[#71717A]">
                     {tc("pulledSpan")}{" "}
                     <span className="font-mono-data text-[#FAFAFA]">
@@ -529,11 +602,19 @@ export default function StutzenPage() {
                     </span>
                   </p>
                 )}
-                <div
-                  className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
-                  dangerouslySetInnerHTML={{ __html: detail.route_html || detail.route || "—" }}
-                />
-                <p className="text-xs text-[#52525B]">{tc("pulledHint")}</p>
+                {detail.route_missing ? (
+                  <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
+                    {detail.route_warning || tc("routeMissing")}
+                  </p>
+                ) : (
+                  <>
+                    <div
+                      className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
+                      dangerouslySetInnerHTML={{ __html: detail.route_html || detail.route || "—" }}
+                    />
+                    <p className="text-xs text-[#52525B]">{tc("pulledHint")}</p>
+                  </>
+                )}
               </div>
             );
           }}

@@ -752,6 +752,8 @@ def test_near_complete_cables():
     near = near_complete_cables(df, max_remaining_m=15.0)
     assert list(near["Kabelnr"]) == ["a", "b"]
     assert round(float(near["Remaining_m"].sum()), 1) == 25.0
+    # Finishing them grows fully-pulled total by full Length_m (100+50), not Remaining_m.
+    assert round(float(near["Length_m"].sum()), 1) == 150.0
     assert near_complete_cables(df, max_remaining_m=9.0).empty
     wider = near_complete_cables(df, max_remaining_m=20.0)
     assert list(wider["Kabelnr"]) == ["a", "b", "c"]
@@ -794,6 +796,28 @@ def test_stichmass_from_stuetze_to_a():
     missing = stichmass_from_stuetze_to_a(route, "NINCS", "3EDV205", 0.5)
     assert not missing.ok
     assert "nem található" in missing.error.lower()
+
+
+def test_nearest_end_stichmass():
+    from src.length_calc import format_stichmass_label, nearest_end_stichmass
+
+    # A(device) --2.1-- 3EDH006 --3.0-- MID --1.0-- 1EDV100 --4.0-- E(device)
+    route = "DEV_A (E 2,1) 3EDH006 (E 3,0) MID (E 1,0) 1EDV100 (E 4,0) DEV_E"
+    st_a, res_a = nearest_end_stichmass(
+        route, end="A", node_a="DEV_A", node_e="DEV_E", aln_a=0.0, aln_e=0.0
+    )
+    assert st_a == "3EDH006"
+    assert res_a.ok
+    assert round(res_a.meters, 1) == 2.1
+    assert format_stichmass_label(st_a, res_a) == "3EDH006 : 2,1 m"
+
+    st_e, res_e = nearest_end_stichmass(
+        route, end="E", node_a="DEV_A", node_e="DEV_E", aln_a=0.0, aln_e=0.5
+    )
+    assert st_e == "1EDV100"
+    assert res_e.ok
+    assert round(res_e.meters, 1) == 4.5  # 4.0 route + 0.5 Aln_E
+    assert "1EDV100" in format_stichmass_label(st_e, res_e)
 
 
 def test_workforce_headcount_and_positions():

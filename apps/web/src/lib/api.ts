@@ -66,7 +66,7 @@ export const api = {
   },
 };
 
-export function qs(params: Record<string, string | number | undefined | null>) {
+export function qs(params: Record<string, string | number | boolean | undefined | null>) {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null && String(v) !== "") sp.set(k, String(v));

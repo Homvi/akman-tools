@@ -13,6 +13,7 @@ from apps.api.routers import (
     cables,
     calculator,
     dataset,
+    devices,
     errors,
     export,
     ids,
@@ -52,6 +53,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(dataset.router)
 app.include_router(cables.router)
+app.include_router(devices.router)
 app.include_router(export.router)
 app.include_router(errors.router)
 app.include_router(stopped.router)
