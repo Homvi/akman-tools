@@ -5,6 +5,7 @@ import { Link } from "@/i18n/routing";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Download, Search } from "lucide-react";
 import { api, qs } from "@/lib/api";
+import { displayText, isBlankDisplay, isRouteMissing } from "@/lib/display";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable } from "@/components/data-table";
@@ -111,36 +112,38 @@ function CableCard({ cable }: { cable: CableDetail }) {
       <div className="grid gap-3 text-sm sm:grid-cols-2">
         <div className="rounded-md border border-[#27272A] bg-[#09090B] p-3">
           <div className="text-xs uppercase tracking-wide text-[#71717A]">{t("sourceA")}</div>
-          <div className="mt-1 font-medium text-[#FAFAFA]">{cable.geraet_a || "—"}</div>
-          <div className="mt-1 text-[#A1A1AA]">{cable.ort_a || "—"}</div>
+          <div className="mt-1 font-medium text-[#FAFAFA]">{displayText(cable.geraet_a)}</div>
+          <div className="mt-1 text-[#A1A1AA]">{displayText(cable.ort_a)}</div>
           <div className="mt-2 text-xs text-[#71717A]">
             {t("alnRequested")}{" "}
-            <span className="font-mono-data text-[#FAFAFA]">{cable.aln_a || "—"}</span>
+            <span className="font-mono-data text-[#FAFAFA]">{displayText(cable.aln_a)}</span>
           </div>
         </div>
         <div className="rounded-md border border-[#27272A] bg-[#09090B] p-3">
           <div className="text-xs uppercase tracking-wide text-[#71717A]">{t("sourceE")}</div>
-          <div className="mt-1 font-medium text-[#FAFAFA]">{cable.geraet_e || "—"}</div>
-          <div className="mt-1 text-[#A1A1AA]">{cable.ort_e || "—"}</div>
+          <div className="mt-1 font-medium text-[#FAFAFA]">{displayText(cable.geraet_e)}</div>
+          <div className="mt-1 text-[#A1A1AA]">{displayText(cable.ort_e)}</div>
           <div className="mt-2 text-xs text-[#71717A]">
             {t("alnRequested")}{" "}
-            <span className="font-mono-data text-[#FAFAFA]">{cable.aln_e || "—"}</span>
+            <span className="font-mono-data text-[#FAFAFA]">{displayText(cable.aln_e)}</span>
           </div>
         </div>
       </div>
 
-      {(cable.pulled_start || cable.pulled_end) && cable.status !== "none" && !cable.route_missing && (
+      {(!isBlankDisplay(cable.pulled_start) || !isBlankDisplay(cable.pulled_end)) &&
+        cable.status !== "none" &&
+        !isRouteMissing(cable) && (
         <p className="text-sm text-[#71717A]">
           {tc("pulledSpan")}{" "}
           <span className="font-mono-data text-[#FAFAFA]">
-            {cable.pulled_start || "—"} → {cable.pulled_end || "—"}
+            {displayText(cable.pulled_start)} → {displayText(cable.pulled_end)}
           </span>
         </p>
       )}
 
       <div>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-[#71717A]">{tc("route")}</div>
-        {cable.route_missing ? (
+        {isRouteMissing(cable) ? (
           <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
             {cable.route_warning || tc("routeMissing")}
           </p>
@@ -148,7 +151,7 @@ function CableCard({ cable }: { cable: CableDetail }) {
           <>
             <div
               className="overflow-x-auto rounded-md border border-[#27272A] bg-[#09090B] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
-              dangerouslySetInnerHTML={{ __html: cable.route_html || cable.route || "—" }}
+              dangerouslySetInnerHTML={{ __html: cable.route_html || displayText(cable.route) }}
             />
             <p className="mt-2 text-xs text-[#52525B]">{tc("pulledHint")}</p>
           </>
@@ -347,15 +350,16 @@ export default function DashboardPage() {
                                 <p className="text-sm text-[#FAFAFA]">
                                   {detail.status_message || detail.status_label}
                                 </p>
-                                {(detail.pulled_start || detail.pulled_end) && !detail.route_missing && (
+                                {(!isBlankDisplay(detail.pulled_start) || !isBlankDisplay(detail.pulled_end)) &&
+                                  !isRouteMissing(detail) && (
                                   <p className="text-xs text-[#A1A1AA]">
                                     {tc("pulledSpan")}{" "}
                                     <span className="font-mono-data text-[#FAFAFA]">
-                                      {detail.pulled_start || "—"} → {detail.pulled_end || "—"}
+                                      {displayText(detail.pulled_start)} → {displayText(detail.pulled_end)}
                                     </span>
                                   </p>
                                 )}
-                                {detail.route_missing ? (
+                                {isRouteMissing(detail) ? (
                                   <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
                                     {detail.route_warning || tc("routeMissing")}
                                   </p>
@@ -364,7 +368,7 @@ export default function DashboardPage() {
                                     <div
                                       className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7"
                                       dangerouslySetInnerHTML={{
-                                        __html: detail.route_html || detail.route || "—",
+                                        __html: detail.route_html || displayText(detail.route),
                                       }}
                                     />
                                     <p className="text-xs text-[#71717A]">

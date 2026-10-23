@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Download, Upload } from "lucide-react";
 import { api, qs } from "@/lib/api";
+import { displayText, isBlankDisplay, isRouteMissing } from "@/lib/display";
 import { Button } from "@/components/ui/button";
 import { DataTable } from "@/components/data-table";
 import { TopProgress } from "@/components/progress-bar";
@@ -306,15 +307,16 @@ export default function NearCompletePage() {
           return (
             <div className="space-y-2">
               <p className="text-sm text-[#FAFAFA]">{detail.status_message || detail.status_label}</p>
-              {(detail.pulled_start || detail.pulled_end) && !detail.route_missing && (
+              {(!isBlankDisplay(detail.pulled_start) || !isBlankDisplay(detail.pulled_end)) &&
+                !isRouteMissing(detail) && (
                 <p className="text-xs text-[#71717A]">
                   {tc("pulledSpan")}{" "}
                   <span className="font-mono-data text-[#FAFAFA]">
-                    {detail.pulled_start || "—"} → {detail.pulled_end || "—"}
+                    {displayText(detail.pulled_start)} → {displayText(detail.pulled_end)}
                   </span>
                 </p>
               )}
-              {detail.route_missing ? (
+              {isRouteMissing(detail) ? (
                 <p className="rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-3 text-sm text-[#FDBA74]">
                   {detail.route_warning || tc("routeMissing")}
                 </p>
@@ -322,7 +324,7 @@ export default function NearCompletePage() {
                 <>
                   <div
                     className="overflow-x-auto rounded-md border border-[#27272A] bg-[#0C0C0E] p-3 font-mono-data text-sm leading-7 text-[#E4E4E7]"
-                    dangerouslySetInnerHTML={{ __html: detail.route_html || detail.route || "—" }}
+                    dangerouslySetInnerHTML={{ __html: detail.route_html || displayText(detail.route) }}
                   />
                   <p className="text-xs text-[#52525B]">{tc("pulledHint")}</p>
                 </>

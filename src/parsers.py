@@ -220,7 +220,19 @@ def _flatten_catra_block(block: pd.DataFrame) -> dict | None:
         return None
 
     laenge = pd.to_numeric(_cell(block, 0, 3).replace(",", ".") or None, errors="coerce")
-    path_cells = [str(v).strip() for v in block.iloc[3].tolist() if pd.notna(v) and str(v).strip()]
+    path_cells = []
+    for v in block.iloc[3].tolist():
+        if v is None:
+            continue
+        try:
+            if pd.isna(v):
+                continue
+        except (TypeError, ValueError):
+            pass
+        text = str(v).strip()
+        if not text or text.lower() in {"nan", "<na>", "none", "nat"}:
+            continue
+        path_cells.append(text)
     geraet_a = _cell(block, 0, 9)
     geraet_e = _cell(block, 1, 9)
     devices = [part for part in (geraet_a, geraet_e) if part]

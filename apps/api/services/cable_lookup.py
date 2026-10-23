@@ -14,6 +14,7 @@ from src.length_calc import (
     latest_pull_ends,
     parse_route,
 )
+from apps.api.services.jsonutil import sanitize_obj
 from src.ids import SPLIT_CABLE_IDS, join_key, normalize_kabel_id
 from src.stutzen_filter import cable_route
 
@@ -167,12 +168,16 @@ _ROUTE_MISSING_MSG = (
 
 def cable_detail(row: pd.Series) -> dict:
     status = cable_pull_status(row)
-    route = cable_route(row)
+    route = _text(cable_route(row))
     nodes, distances = parse_route(route)
     # Drop NaN-like tokens if a bad path slipped through.
     nodes = [n for n in nodes if _text(n)]
     distances = distances[: max(0, len(nodes) - 1)] if nodes else []
+    if not nodes:
+        route = ""
     pulled_start, pulled_end = latest_pull_ends(row)
+    pulled_start = _text(pulled_start)
+    pulled_end = _text(pulled_end)
     verlegt_date = _fmt_date(row.get("verlegt"))
     stop_date = _latest_stop_date(row)
     route_missing = status in {STATUS_COMPLETE, STATUS_PARTIAL} and not nodes
@@ -230,43 +235,51 @@ def cable_detail(row: pd.Series) -> dict:
         done = calculate_pulled_length(route, node_a, allow_a, node_e, allow_e, pulled_start, pulled_end)
         already_m = done.meters if done.ok else 0.0
 
-    return {
-        "kabelnr": _text(row.get("Kabelnr")),
-        "status": status,
-        "status_label": {
-            STATUS_COMPLETE: "Teljesen behúzva",
-            STATUS_PARTIAL: "Részlegesen behúzva",
-            STATUS_NONE: "Nincs behúzás",
-        }.get(status, status),
-        "status_message": status_message,
-        "verlegt_date": verlegt_date,
-        "stop_date": stop_date,
-        "pull_status": _text(row.get("Pull_status")),
-        "route": route,
-        "route_html": route_html,
-        "route_missing": route_missing,
-        "route_warning": route_warning,
-        "pulled_start": pulled_start,
-        "pulled_end": pulled_end,
-        "already_pulled_m": already_m,
-        "nodes": nodes,
-        "distances": distances,
-        "node_a": node_a,
-        "node_e": node_e,
-        "length_m": _num(row.get("Length_m")),
-        "category": _text(row.get("Category")),
-        "liste": _text(row.get("Liste")),
-        "cable_type": cable_type,
-        "adern": adern,
-        "geraet_a": geraet_a,
-        "geraet_e": geraet_e,
-        "ort_a": ort_a,
-        "ort_e": ort_e,
-        "aln_a": aln_a,
-        "aln_e": aln_e,
-        "allowance_a": allow_a,
-        "allowance_e": allow_e,
-    }
+    # Never leak literal "nan" into JSON/UI (old clients fall back to route text).
+    if route_missing or not nodes:
+        route = ""
+        if route_missing or status != STATUS_NONE:
+            route_html = ""
+
+    return sanitize_obj(
+        {
+            "kabelnr": _text(row.get("Kabelnr")),
+            "status": status,
+            "status_label": {
+                STATUS_COMPLETE: "Teljesen behúzva",
+                STATUS_PARTIAL: "Részlegesen behúzva",
+                STATUS_NONE: "Nincs behúzás",
+            }.get(status, status),
+            "status_message": status_message,
+            "verlegt_date": verlegt_date,
+            "stop_date": stop_date,
+            "pull_status": _text(row.get("Pull_status")),
+            "route": route,
+            "route_html": route_html,
+            "route_missing": route_missing,
+            "route_warning": route_warning,
+            "pulled_start": "" if route_missing else pulled_start,
+            "pulled_end": "" if route_missing else pulled_end,
+            "already_pulled_m": already_m,
+            "nodes": nodes,
+            "distances": distances,
+            "node_a": node_a,
+            "node_e": node_e,
+            "length_m": _num(row.get("Length_m")),
+            "category": _text(row.get("Category")),
+            "liste": _text(row.get("Liste")),
+            "cable_type": cable_type,
+            "adern": adern,
+            "geraet_a": geraet_a,
+            "geraet_e": geraet_e,
+            "ort_a": ort_a,
+            "ort_e": ort_e,
+            "aln_a": aln_a,
+            "aln_e": aln_e,
+            "allowance_a": allow_a,
+            "allowance_e": allow_e,
+        }
+    )
 
 
 def lookup_export_frame(details: list[dict]) -> pd.DataFrame:
