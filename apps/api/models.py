@@ -87,6 +87,28 @@ class WorkerNote(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkerCategory(Base):
+    __tablename__ = "worker_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    category: Mapped[str] = mapped_column(String(64))
+    updated_by: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TaskNote(Base):
+    __tablename__ = "task_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(64), index=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    author_email: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AreasSettings(Base):
     __tablename__ = "areas_settings"
 

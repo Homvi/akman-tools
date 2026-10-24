@@ -76,6 +76,8 @@
     "anschlussStart": "Start wired (Anschluss 1) — start point not handed over",
     "anschlussEnd": "End wired (Anschluss 2) — end point not handed over",
     "anschlussBoth": "Start and end wired — no verlegt date",
+    "leaveMissingTitle": "{count, plural, one {# person has not submitted leave} other {# people have not submitted leave}}",
+    "leaveMissingHint": "No leave day is marked in the headcount Excel from today onwards.",
     "empty": "No data loaded. Upload Progressliste and Gesamtliste on the Upload page.",
     "emptyUploadLink": "Upload",
     "searchTitle": "Cable search",
@@ -289,7 +291,47 @@
     "conflictLeave": "Leave: {range}",
     "conflictsCount": "{count, plural, one {# conflict} other {# conflicts}}",
     "selectedConflict": "{name} is on leave during this period ({range})",
-    "details": "Details"
+    "details": "Details",
+    "exportPdf": "Export PDF",
+    "requirementsLabel": "Required",
+    "reqDecrease": "Fewer",
+    "reqIncrease": "More",
+    "reqAdd": "Category",
+    "reqSet": "Set requirements",
+    "reqPick": "Category…",
+    "notRequired": "not required",
+    "noCategory": "uncategorized",
+    "hideLeaveNow": "Hide people on leave now",
+    "hideLeaveNextWeek": "Hide people on leave next week",
+    "classifyTitle": "Classification",
+    "classifyHint": "The category belongs to the app; a new Excel upload will not overwrite it. Set it here when there is no automatic match.",
+    "classifyMissing": "{count} uncategorized",
+    "classifyAllDone": "Everyone is classified",
+    "classifyOnlyMissing": "Uncategorized only",
+    "summaryTitle": "Required",
+    "summaryHint": "Needed / roster across open tasks",
+    "summaryTileTitle": "needed / roster",
+    "summaryShort": "{count, plural, one {# category is short} other {# categories are short}}",
+    "summaryAssigned": "{count} assigned",
+    "summaryLeave": "on leave now {now} · next week {next}",
+    "summaryUnclassified": "{count, plural, one {# person has no category} other {# people have no category}}",
+    "notesTitle": "Notes ({count})",
+    "notePlaceholder": "New note…",
+    "noteAdd": "Add",
+    "noteDelete": "Delete",
+    "notesEmpty": "No notes yet",
+    "noteShortcut": "Ctrl+Enter to save"
+  },
+  "categories": {
+    "cable_puller": "Cable puller",
+    "electrician": "Electrician",
+    "long_distance_lead": "Long-distance cable pull lead",
+    "local_cabling_lead": "Local cabling lead",
+    "electrician_lead": "Electrician lead",
+    "none": "Uncategorized",
+    "autoWith": "automatic: {label}",
+    "autoHint": "From the Excel position. Pick another to override.",
+    "manualHint": "Set by hand. The empty row restores the automatic guess."
   },
   "workers": {
     "back": "Back to Teams",
@@ -334,7 +376,8 @@
     "notePlaceholder": "New note…",
     "addNote": "Add",
     "noNotes": "No notes yet",
-    "delete": "Delete"
+    "delete": "Delete",
+    "category": "Category"
   },
   "datePicker": {
     "setDates": "Set period",
@@ -374,7 +417,8 @@
     "more": "+{count}",
     "dayTasks": "Tasks: {date}",
     "noTasksDay": "No tasks on this day.",
-    "week": "Week {week}"
+    "week": "Week {week}",
+    "notesCount": "{count, plural, one {# note} other {# notes}}"
   },
   "notifications": {
     "title": "Notifications",

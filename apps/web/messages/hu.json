@@ -76,6 +76,8 @@
     "anschlussStart": "Start bekötve (Anschluss 1) — kezdőpont nincs leadva",
     "anschlussEnd": "End bekötve (Anschluss 2) — végpont nincs leadva",
     "anschlussBoth": "Kezdő- és végpont bekötve — nincs verlegt dátum",
+    "leaveMissingTitle": "{count} fő még nem adta le a szabadságát",
+    "leaveMissingHint": "Akinek a létszám Excelben a mai naptól nincs bejelölve szabadnap.",
     "empty": "Nincs betöltött adat. Tölts fel Progresslistét és Gesamtliste-t az Upload oldalon.",
     "emptyUploadLink": "Upload",
     "searchTitle": "Kábelkereső",
@@ -289,7 +291,47 @@
     "conflictLeave": "Szabi: {range}",
     "conflictsCount": "{count} ütközés",
     "selectedConflict": "{name} szabadságon lesz ebben az időszakban ({range})",
-    "details": "Részletek"
+    "details": "Részletek",
+    "exportPdf": "PDF export",
+    "requirementsLabel": "Elvárás",
+    "reqDecrease": "Kevesebb",
+    "reqIncrease": "Több",
+    "reqAdd": "Kategória",
+    "reqSet": "Elvárás megadása",
+    "reqPick": "Kategória…",
+    "notRequired": "nincs elvárásban",
+    "noCategory": "nincs besorolva",
+    "hideLeaveNow": "Most szabin elrejtése",
+    "hideLeaveNextWeek": "Jövő héten szabin elrejtése",
+    "classifyTitle": "Besorolás",
+    "classifyHint": "A kategória a programé, az Excel új feltöltése nem írja felül. Ahol nincs automatikus találat, állítsd be itt.",
+    "classifyMissing": "{count} nincs besorolva",
+    "classifyAllDone": "Mindenki be van sorolva",
+    "classifyOnlyMissing": "Csak a besorolatlanok",
+    "summaryTitle": "Szükséges",
+    "summaryHint": "Szükséges / létszám a nyitott taskokból",
+    "summaryTileTitle": "szükséges / létszám",
+    "summaryShort": "{count} kategóriában kevés az ember",
+    "summaryAssigned": "{count} beosztva",
+    "summaryLeave": "most szabin {now} · jövő héten {next}",
+    "summaryUnclassified": "{count} embernek még nincs kategóriája",
+    "notesTitle": "Megjegyzések ({count})",
+    "notePlaceholder": "Új megjegyzés…",
+    "noteAdd": "Hozzáadás",
+    "noteDelete": "Törlés",
+    "notesEmpty": "Még nincs megjegyzés",
+    "noteShortcut": "Ctrl+Enter mentés"
+  },
+  "categories": {
+    "cable_puller": "Kábelhúzó",
+    "electrician": "Villanyszerelő",
+    "long_distance_lead": "Távolsági kábelhúzó csoportvezető",
+    "local_cabling_lead": "Helyi kábelező csoportvezető",
+    "electrician_lead": "Villanyszerelő csoportvezető",
+    "none": "Nincs besorolva",
+    "autoWith": "automatikus: {label}",
+    "autoHint": "Az Excel beosztásából. Válassz másikat, ha felülírod.",
+    "manualHint": "Kézzel beállítva. Az üres sor visszateszi az automatikusat."
   },
   "workers": {
     "back": "Vissza a Csapatokhoz",
@@ -334,7 +376,8 @@
     "notePlaceholder": "Új megjegyzés…",
     "addNote": "Hozzáadás",
     "noNotes": "Még nincs megjegyzés",
-    "delete": "Törlés"
+    "delete": "Törlés",
+    "category": "Kategória"
   },
   "datePicker": {
     "setDates": "Időszak megadása",
@@ -374,7 +417,8 @@
     "more": "+{count}",
     "dayTasks": "Task-ok: {date}",
     "noTasksDay": "Erre a napra nincs task.",
-    "week": "{week}. hét"
+    "week": "{week}. hét",
+    "notesCount": "{count} megjegyzés"
   },
   "notifications": {
     "title": "Értesítések",

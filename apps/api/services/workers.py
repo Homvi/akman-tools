@@ -9,8 +9,9 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from apps.api.config import settings
-from apps.api.models import WorkerNote, WorkerProfile, WorkerRating
+from apps.api.models import WorkerCategory, WorkerNote, WorkerProfile, WorkerRating
 from apps.api.services import workforce_board as board_svc
+from src.staffing_categories import apply_categories
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_LANGUAGES = 20
@@ -101,6 +102,9 @@ def get_worker_detail(
         frame = board_svc.load_workforce_frame()
         people = board_svc.list_people(frame) if frame is not None else []
     person = next((p for p in people if person_key(p.get("name", "")) == key), None)
+    if person is not None:
+        overrides = {row.person_key: row.category for row in db.query(WorkerCategory).all()}
+        person = apply_categories([person], overrides, key_of=person_key)[0]
     profile = _get_profile(db, key)
     if person is None and profile is None:
         raise WorkerNotFound(name)

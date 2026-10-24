@@ -76,6 +76,8 @@
     "anschlussStart": "Start angeschlossen (Anschluss 1) — Startpunkt nicht übergeben",
     "anschlussEnd": "Ende angeschlossen (Anschluss 2) — Endpunkt nicht übergeben",
     "anschlussBoth": "Start und Ende angeschlossen — kein verlegt-Datum",
+    "leaveMissingTitle": "{count, plural, one {# Person hat keinen Urlaub angegeben} other {# Personen haben keinen Urlaub angegeben}}",
+    "leaveMissingHint": "Im Personal-Excel ist ab heute kein Urlaubstag markiert.",
     "empty": "Keine Daten geladen. Progressliste und Gesamtliste auf der Upload-Seite hochladen.",
     "emptyUploadLink": "Upload",
     "searchTitle": "Kabelsuche",
@@ -289,7 +291,47 @@
     "conflictLeave": "Urlaub: {range}",
     "conflictsCount": "{count, plural, one {# Konflikt} other {# Konflikte}}",
     "selectedConflict": "{name} ist in diesem Zeitraum im Urlaub ({range})",
-    "details": "Details"
+    "details": "Details",
+    "exportPdf": "PDF-Export",
+    "requirementsLabel": "Anforderung",
+    "reqDecrease": "Weniger",
+    "reqIncrease": "Mehr",
+    "reqAdd": "Kategorie",
+    "reqSet": "Anforderung festlegen",
+    "reqPick": "Kategorie…",
+    "notRequired": "nicht angefordert",
+    "noCategory": "keine Kategorie",
+    "hideLeaveNow": "Aktuell im Urlaub ausblenden",
+    "hideLeaveNextWeek": "Urlaub nächste Woche ausblenden",
+    "classifyTitle": "Einordnung",
+    "classifyHint": "Die Kategorie gehört zur App; ein neuer Excel-Upload überschreibt sie nicht. Fehlt die automatische Zuordnung, stelle sie hier ein.",
+    "classifyMissing": "{count} ohne Kategorie",
+    "classifyAllDone": "Alle sind eingeordnet",
+    "classifyOnlyMissing": "Nur ohne Kategorie",
+    "summaryTitle": "Bedarf",
+    "summaryHint": "Bedarf / Bestand über offene Tasks",
+    "summaryTileTitle": "Bedarf / Bestand",
+    "summaryShort": "{count, plural, one {# Kategorie ist knapp} other {# Kategorien sind knapp}}",
+    "summaryAssigned": "{count} zugewiesen",
+    "summaryLeave": "jetzt im Urlaub {now} · nächste Woche {next}",
+    "summaryUnclassified": "{count, plural, one {# Person hat keine Kategorie} other {# Personen haben keine Kategorie}}",
+    "notesTitle": "Notizen ({count})",
+    "notePlaceholder": "Neue Notiz…",
+    "noteAdd": "Hinzufügen",
+    "noteDelete": "Löschen",
+    "notesEmpty": "Noch keine Notizen",
+    "noteShortcut": "Strg+Enter speichert"
+  },
+  "categories": {
+    "cable_puller": "Kabelzieher",
+    "electrician": "Elektriker",
+    "long_distance_lead": "Vorarbeiter Fernkabelzug",
+    "local_cabling_lead": "Vorarbeiter lokale Verkabelung",
+    "electrician_lead": "Vorarbeiter Elektriker",
+    "none": "Keine Kategorie",
+    "autoWith": "automatisch: {label}",
+    "autoHint": "Aus der Excel-Position. Wähle eine andere, um sie zu überschreiben.",
+    "manualHint": "Manuell gesetzt. Die leere Zeile stellt die automatische Zuordnung wieder her."
   },
   "workers": {
     "back": "Zurück zu Teams",
@@ -334,7 +376,8 @@
     "notePlaceholder": "Neue Notiz…",
     "addNote": "Hinzufügen",
     "noNotes": "Noch keine Notizen",
-    "delete": "Löschen"
+    "delete": "Löschen",
+    "category": "Kategorie"
   },
   "datePicker": {
     "setDates": "Zeitraum festlegen",
@@ -374,7 +417,8 @@
     "more": "+{count}",
     "dayTasks": "Tasks: {date}",
     "noTasksDay": "An diesem Tag keine Tasks.",
-    "week": "KW {week}"
+    "week": "KW {week}",
+    "notesCount": "{count, plural, one {# Notiz} other {# Notizen}}"
   },
   "notifications": {
     "title": "Benachrichtigungen",

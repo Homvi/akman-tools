@@ -30,8 +30,11 @@ import {
   personLeaveRanges,
   startOfDay,
   taskRange,
+  LEAD_CATEGORIES,
+  type Category,
   type Person,
 } from "@/lib/staffing";
+import { CategorySelect } from "@/components/category-select";
 
 type CurrentTask = {
   id: string;
@@ -310,6 +313,33 @@ export default function WorkerPage() {
     return run(() => api.put<WorkerDetail>(`/workers/profile${q}`, patch));
   }
 
+  async function saveCategory(category: Category | null) {
+    setBusy(true);
+    setError("");
+    try {
+      const res = await api.put<Pick<Person, "category" | "category_source">>("/workforce/people/category", {
+        name,
+        category,
+      });
+      setDetail((prev) =>
+        prev?.person
+          ? {
+              ...prev,
+              person: {
+                ...prev.person,
+                ...res,
+                is_lead: res.category ? LEAD_CATEGORIES.has(res.category) : prev.person.is_lead,
+              },
+            }
+          : prev
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tc("loadFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onPhotoPicked(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -478,6 +508,12 @@ export default function WorkerPage() {
               <h1 className="break-words text-2xl font-semibold tracking-tight text-[#FAFAFA]">{detail.name}</h1>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[#A1A1AA]">
                 {person?.position ? <span>{person.position}</span> : null}
+                {person ? (
+                  <label className="inline-flex items-center gap-1.5">
+                    <span className="text-xs text-[#71717A]">{t("category")}</span>
+                    <CategorySelect person={person} disabled={busy} onChange={(c) => void saveCategory(c)} />
+                  </label>
+                ) : null}
                 {person?.is_lead ? (
                   <span className="rounded bg-[#F59E0B]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#FCD34D]">
                     {t("lead")}
