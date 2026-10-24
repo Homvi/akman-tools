@@ -1,29 +1,55 @@
 "use client";
 
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
-import { AlertTriangle, Info, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, FileDown, Info, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { isStaff, useMe } from "@/components/auth-gate";
-import { api } from "@/lib/api";
+import { api, qs } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TopProgress } from "@/components/progress-bar";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { useCategoryLabel } from "@/components/category-select";
+import { ClassificationPanel } from "@/components/teams/classification-panel";
+import { RequirementsEditor } from "@/components/teams/requirements-editor";
+import { SummaryBar } from "@/components/teams/summary-bar";
+import { TaskNotes, type TaskNote } from "@/components/teams/task-notes";
 import { cn } from "@/lib/utils";
 import {
+  DEFAULT_REQUIREMENTS,
+  LEAD_CATEGORIES,
   formatShortRange,
   leaveOverlapsNextWeek,
+  membersOutsideRequirements,
   newId,
   normalizeTask,
   personLeaveRanges,
+  requirementsSummary,
+  requirementsTotal,
+  taskCategoryCounts,
   taskLeaveConflict,
   taskMembers,
+  toIsoDate,
   type Board,
+  type Category,
   type LeaveRange,
   type Person,
+  type Requirements,
   type Task,
 } from "@/lib/staffing";
+
+const HIDE_KEY = "teams.hideLeave";
+
+function readHidePrefs(): { now: boolean; nextWeek: boolean } {
+  if (typeof window === "undefined") return { now: false, nextWeek: false };
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(HIDE_KEY) || "{}");
+    return { now: Boolean(raw.now), nextWeek: Boolean(raw.nextWeek) };
+  } catch {
+    return { now: false, nextWeek: false };
+  }
+}
 
 type StatusFilter = "all" | "available" | "leaveNow" | "leaveNextWeek";
 
@@ -33,12 +59,6 @@ const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: "leaveNow", label: "statusLeaveNow" },
   { key: "leaveNextWeek", label: "statusLeaveNextWeek" },
 ];
-
-function parseSize(raw: string): number {
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.min(n, 999);
-}
 
 function formatLeaveHint(person: Person, leaveLabel: string): string | null {
   const first = personLeaveRanges(person)[0];
@@ -61,6 +81,7 @@ function PersonChip({
   nowLeaveLabel,
   nextWeekLeaveLabel,
   conflictText,
+  outsideRequirements,
   onDragStart,
   onSelect,
 }: {
@@ -72,10 +93,13 @@ function PersonChip({
   nextWeekLeaveLabel: string;
   /** Set when this person's leave overlaps the task they sit on. */
   conflictText?: string | null;
+  /** The task's requirements don't ask for this person's category. */
+  outsideRequirements?: boolean;
   onDragStart: (id: string) => void;
   onSelect?: (id: string) => void;
 }) {
   const t = useTranslations("teams");
+  const categoryLabel = useCategoryLabel();
   const canSeeDetails = isStaff(useMe());
   const leaveHint = formatLeaveHint(person, leaveLabel);
   const onLeaveNow = Boolean(person.on_leave);
@@ -103,6 +127,7 @@ function PersonChip({
       )}
       title={[
         person.position,
+        person.category ? categoryLabel(person.category) : null,
         leaveHint,
         onLeaveNow ? nowLeaveLabel : null,
         nextWeek ? nextWeekLeaveLabel : null,
@@ -128,9 +153,11 @@ function PersonChip({
           </div>
         ) : null}
       </div>
-      {person.position || canSeeDetails ? (
+      {person.position || person.category || canSeeDetails ? (
         <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[#A1A1AA]">
-          <span className="min-w-0 truncate">{person.position}</span>
+          <span className="min-w-0 truncate">
+            {person.category ? categoryLabel(person.category) : person.position}
+          </span>
           {canSeeDetails ? (
             <Link
               href={`/workers/${encodeURIComponent(person.id)}`}
@@ -160,6 +187,11 @@ function PersonChip({
           {leaveHint}
         </div>
       ) : null}
+      {outsideRequirements ? (
+        <div className="mt-1 inline-flex rounded border border-[#F59E0B]/60 px-1.5 py-0.5 text-[10px] font-semibold text-[#FCD34D]">
+          {person.category ? t("notRequired") : t("noCategory")}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -167,6 +199,10 @@ function PersonChip({
 export default function TeamsPage() {
   const t = useTranslations("teams");
   const tc = useTranslations("common");
+  const locale = useLocale();
+  const me = useMe();
+  const staff = isStaff(me);
+  const isAdmin = Boolean(me?.roles.includes("admin"));
   const [people, setPeople] = useState<Person[]>([]);
   const [positions, setPositions] = useState<string[]>([]);
   const [selectedPositions, setSelectedPositions] = useState<string[]>([]);
@@ -179,7 +215,10 @@ export default function TeamsPage() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [newTaskSize, setNewTaskSize] = useState("4");
+  const [newTaskReq, setNewTaskReq] = useState<Requirements>(DEFAULT_REQUIREMENTS);
+  const [notes, setNotes] = useState<Record<string, TaskNote[]>>({});
+  const [hide, setHide] = useState({ now: false, nextWeek: false });
+  const [exporting, setExporting] = useState(false);
   const [newTaskRange, setNewTaskRange] = useState<{ start: string | null; end: string | null }>({
     start: null,
     end: null,
@@ -195,10 +234,12 @@ export default function TeamsPage() {
     setError("");
     setNeedUpload(false);
     try {
-      const [peopleRes, boardRes] = await Promise.all([
+      const [peopleRes, boardRes, notesRes] = await Promise.all([
         api.get<{ people: Person[]; positions: string[] }>("/workforce/people"),
         api.get<Board>("/workforce/board"),
+        api.get<Record<string, TaskNote[]>>("/workforce/board/notes").catch(() => ({})),
       ]);
+      setNotes(notesRes || {});
       setPeople(peopleRes.people || []);
       const pos = peopleRes.positions || [];
       setPositions(pos);
@@ -222,6 +263,7 @@ export default function TeamsPage() {
   }
 
   useEffect(() => {
+    setHide(readHidePrefs());
     void load();
   }, []);
 
@@ -262,7 +304,19 @@ export default function TeamsPage() {
     return ids;
   }, [board.tasks]);
 
+  function setHidePref(patch: Partial<typeof hide>) {
+    const next = { ...hide, ...patch };
+    setHide(next);
+    try {
+      window.localStorage.setItem(HIDE_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
   function matchesStatus(person: Person): boolean {
+    if (hide.now && person.on_leave) return false;
+    if (hide.nextWeek && leaveOverlapsNextWeek(person)) return false;
     if (statusFilter === "available") return !person.on_leave;
     if (statusFilter === "leaveNow") return Boolean(person.on_leave);
     if (statusFilter === "leaveNextWeek") return leaveOverlapsNextWeek(person);
@@ -281,6 +335,8 @@ export default function TeamsPage() {
   const poolLeads = pool.filter((p) => p.is_lead);
   const poolWorkers = pool.filter((p) => !p.is_lead);
   const selectedPerson = selectedPersonId ? peopleById.get(selectedPersonId) : undefined;
+  const summary = useMemo(() => requirementsSummary(board.tasks, people), [board.tasks, people]);
+  const unclassifiedCount = people.filter((p) => !p.category).length;
 
   function taskHeadcount(task: Task) {
     return (task.lead_id ? 1 : 0) + task.worker_ids.length;
@@ -361,7 +417,7 @@ export default function TeamsPage() {
     const task = normalizeTask({
       id: newId("task"),
       title,
-      size: parseSize(newTaskSize),
+      requirements: newTaskReq,
       lead_id: null,
       worker_ids: [],
       blocker: false,
@@ -423,6 +479,69 @@ export default function TeamsPage() {
     if (note !== task.blocker_note) patchTask(task.id, { blocker_note: note });
   }
 
+  function setRequirements(taskId: string, requirements: Requirements) {
+    patchTask(taskId, { requirements, size: requirementsTotal(requirements) });
+  }
+
+  async function setCategory(person: Person, category: Category | null) {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await api.put<Pick<Person, "category" | "category_source">>("/workforce/people/category", {
+        name: person.name,
+        category,
+      });
+      setPeople((prev) =>
+        prev.map((p) =>
+          p.id === person.id
+            ? { ...p, ...res, is_lead: res.category ? LEAD_CATEGORIES.has(res.category) : p.is_lead }
+            : p
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tc("loadFailed"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addNote(taskId: string, text: string) {
+    try {
+      const note = await api.post<TaskNote>(`/workforce/tasks/${encodeURIComponent(taskId)}/notes`, { text });
+      setNotes((prev) => ({ ...prev, [taskId]: [note, ...(prev[taskId] || [])] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tc("loadFailed"));
+      throw err;
+    }
+  }
+
+  async function deleteNote(note: TaskNote) {
+    try {
+      await api.del(`/workforce/tasks/notes/${note.id}`);
+      setNotes((prev) => ({
+        ...prev,
+        [note.task_id]: (prev[note.task_id] || []).filter((n) => n.id !== note.id),
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tc("loadFailed"));
+    }
+  }
+
+  async function exportPdf() {
+    setExporting(true);
+    setError("");
+    try {
+      await api.download(
+        `/workforce/board/pdf${qs({ lang: locale })}`,
+        `csapatok_${toIsoDate(new Date())}.pdf`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tc("exportFailed"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function togglePosition(pos: string) {
     setSelectedPositions((prev) =>
       prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]
@@ -456,10 +575,25 @@ export default function TeamsPage() {
             </p>
           )}
         </div>
-        <Button variant="outline" onClick={() => void load()} disabled={loading}>
-          {tc("refresh")}
-        </Button>
+        <div className="flex gap-2">
+          {!needUpload && (
+            <Button variant="outline" onClick={() => void exportPdf()} disabled={exporting || !board.tasks.length}>
+              <FileDown className="mr-1 h-4 w-4" />
+              {t("exportPdf")}
+            </Button>
+          )}
+          <Button variant="outline" onClick={() => void load()} disabled={loading}>
+            {tc("refresh")}
+          </Button>
+        </div>
       </div>
+
+      {!needUpload && !loading && (
+        <SummaryBar rows={summary} unclassified={unclassifiedCount} />
+      )}
+      {!needUpload && staff && people.length > 0 && (
+        <ClassificationPanel people={people} onSet={(p, c) => void setCategory(p, c)} busy={saving} />
+      )}
 
       {needUpload && (
         <div className="mb-4 rounded-md border border-[#F97316]/40 bg-[#F97316]/10 p-4 text-sm text-[#FDBA74]">
@@ -529,18 +663,8 @@ export default function TeamsPage() {
             autoFocus={!board.tasks.length}
           />
           <div className="flex items-center gap-1.5">
-            <label className="text-xs text-[#A1A1AA]" htmlFor="new-task-size">
-              {t("teamSizeLabel")}
-            </label>
-            <Input
-              id="new-task-size"
-              type="number"
-              min={0}
-              max={999}
-              value={newTaskSize}
-              onChange={(e) => setNewTaskSize(e.target.value)}
-              className="h-9 w-20"
-            />
+            <span className="text-xs text-[#A1A1AA]">{t("requirementsLabel")}</span>
+            <RequirementsEditor requirements={newTaskReq} onChange={setNewTaskReq} />
           </div>
           <DateRangePicker
             start={newTaskRange.start}
@@ -610,7 +734,27 @@ export default function TeamsPage() {
                 </button>
               ))}
             </div>
-            {(searchNeedle || statusFilter !== "all") && pool.length === 0 && (
+            <div className="mb-3 flex flex-col gap-1 text-[11px] text-[#A1A1AA]">
+              <label className="inline-flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-[#71717A]"
+                  checked={hide.now}
+                  onChange={(e) => setHidePref({ now: e.target.checked })}
+                />
+                {t("hideLeaveNow")}
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5 accent-[#F97316]"
+                  checked={hide.nextWeek}
+                  onChange={(e) => setHidePref({ nextWeek: e.target.checked })}
+                />
+                {t("hideLeaveNextWeek")}
+              </label>
+            </div>
+            {(searchNeedle || statusFilter !== "all" || hide.now || hide.nextWeek) && pool.length === 0 && (
               <p className="mb-2 text-xs text-[#71717A]">{t("noSearchResults")}</p>
             )}
 
@@ -650,7 +794,7 @@ export default function TeamsPage() {
                   onSelect={toggleSelectPerson}
                 />
               ))}
-              {!pool.length && !searchNeedle && statusFilter === "all" && (
+              {!pool.length && !searchNeedle && statusFilter === "all" && !hide.now && !hide.nextWeek && (
                 <p className="text-xs text-[#52525B]">{t("poolEmpty")}</p>
               )}
             </div>
@@ -689,6 +833,8 @@ export default function TeamsPage() {
               const blockedOpen = task.blocker && !task.done;
               const noteValue = noteDrafts[task.id] ?? task.blocker_note;
               const noteMissing = task.blocker && !noteValue.trim();
+              const categoryCounts = taskCategoryCounts(task, peopleById);
+              const outside = membersOutsideRequirements(task, peopleById);
               return (
                 <div
                   key={task.id}
@@ -757,25 +903,6 @@ export default function TeamsPage() {
                         </button>
                       </div>
                     )}
-                    <Input
-                      type="number"
-                      min={0}
-                      max={999}
-                      value={task.size || ""}
-                      onChange={(e) => {
-                        const size = parseSize(e.target.value);
-                        setBoard({
-                          ...board,
-                          tasks: board.tasks.map((item) =>
-                            item.id === task.id ? { ...item, size } : item
-                          ),
-                        });
-                      }}
-                      onBlur={() => void persist(board)}
-                      onClick={(e) => e.stopPropagation()}
-                      title={t("teamSizeLabel")}
-                      className="h-8 w-14 shrink-0 px-1 text-center"
-                    />
                     <Button
                       type="button"
                       variant="outline"
@@ -814,6 +941,14 @@ export default function TeamsPage() {
                         {t("markDone")}
                       </span>
                     )}
+                  </div>
+
+                  <div className="mb-1.5">
+                    <RequirementsEditor
+                      requirements={task.requirements}
+                      counts={categoryCounts}
+                      onChange={(req) => setRequirements(task.id, req)}
+                    />
                   </div>
 
                   <p
@@ -857,6 +992,7 @@ export default function TeamsPage() {
                         nowLeaveLabel={t("leaveNow")}
                         nextWeekLeaveLabel={t("leaveNextWeek")}
                         conflictText={conflictLabel(taskLeaveConflict(lead, task))}
+                        outsideRequirements={outside.has(lead.id)}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
@@ -895,6 +1031,7 @@ export default function TeamsPage() {
                         nowLeaveLabel={t("leaveNow")}
                         nextWeekLeaveLabel={t("leaveNextWeek")}
                         conflictText={conflictLabel(taskLeaveConflict(person, task))}
+                        outsideRequirements={outside.has(person.id)}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
@@ -903,6 +1040,14 @@ export default function TeamsPage() {
                       <p className="px-1 py-1 text-xs text-[#52525B]">{t("dropWorkers")}</p>
                     )}
                   </div>
+
+                  <TaskNotes
+                    notes={notes[task.id] || []}
+                    canWrite={staff}
+                    canDelete={(n) => isAdmin || n.author_email === me?.email}
+                    onAdd={(text) => addNote(task.id, text)}
+                    onDelete={(n) => void deleteNote(n)}
+                  />
 
                   <div
                     className="mt-2 border-t border-[#27272A] pt-2"
