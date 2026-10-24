@@ -79,6 +79,71 @@ def test_list_people_keeps_new_names_without_present_mark():
     assert by_name["OnLeave"]["on_leave"] is True
 
 
+def test_list_people_merges_reordered_and_accented_names():
+    """Same tokens in any order / accents collapse to one person; newest spelling wins."""
+    from datetime import date
+
+    df = pd.DataFrame(
+        [
+            {
+                "Date": "2026-10-20",
+                "Name": "Brewka Patryk Daniel",
+                "Position": "Cable puller",
+                "Present": True,
+                "Status": "work",
+            },
+            {
+                "Date": "2026-10-23",
+                "Name": "Patryk Daniel Brewka",
+                "Position": "Cable puller",
+                "Present": True,
+                "Status": "work",
+            },
+            {
+                "Date": "2026-10-22",
+                "Name": "Kovács Anna",
+                "Position": "Electrician",
+                "Present": True,
+                "Status": "work",
+            },
+            {
+                "Date": "2026-10-21",
+                "Name": "Anna Kovacs",
+                "Position": "Electrician",
+                "Present": False,
+                "Status": "leave",
+            },
+        ]
+    )
+    people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
+    by_name = {p["name"]: p for p in people}
+    assert set(by_name) == {"Patryk Daniel Brewka", "Kovács Anna"}
+    assert by_name["Patryk Daniel Brewka"]["available"] is True
+    assert by_name["Kovács Anna"]["last_present"] == "2026-10-22"
+
+
+def test_remap_board_person_names_to_canonical(tmp_path, monkeypatch):
+    monkeypatch.setattr(board_svc, "board_path", lambda: tmp_path / "workforce_board.json")
+    monkeypatch.setattr(board_svc, "load_workforce_frame", lambda: pd.DataFrame(
+        [
+            {"Date": "2026-10-20", "Name": "Brewka Patryk Daniel", "Position": "Cable puller", "Present": True},
+            {"Date": "2026-10-23", "Name": "Patryk Daniel Brewka", "Position": "Cable puller", "Present": True},
+        ]
+    ))
+    saved = board_svc.save_board(
+        {
+            "tasks": [
+                {
+                    "title": "Night",
+                    "lead_id": None,
+                    "worker_ids": ["Brewka Patryk Daniel", "Someone Else"],
+                }
+            ]
+        }
+    )
+    assert saved["tasks"][0]["worker_ids"] == ["Patryk Daniel Brewka", "Someone Else"]
+
+
 def test_list_people_merges_position_case_variants():
     from datetime import date
 
@@ -116,7 +181,7 @@ def test_normalize_task_board_lead_and_workers(tmp_path, monkeypatch):
                 },
                 {
                     "title": "Pull 4012",
-                    "lead_id": "Anna",  # already claimed by first task → dropped
+                    "lead_id": "Anna",  # same lead on multiple tasks is allowed
                     "worker_ids": ["Cecil"],
                 },
             ],
@@ -129,7 +194,7 @@ def test_normalize_task_board_lead_and_workers(tmp_path, monkeypatch):
     assert saved["tasks"][0]["worker_ids"] == ["Béla", "Ghost"]
     assert saved["tasks"][0]["size"] == 4
     assert saved["tasks"][0]["blocker"] is True
-    assert saved["tasks"][1]["lead_id"] is None
+    assert saved["tasks"][1]["lead_id"] == "Anna"
     assert saved["tasks"][1]["worker_ids"] == ["Cecil"]
     assert saved["updated_at"]
 

@@ -30,8 +30,17 @@ def test_guess_category_from_excel_positions():
     assert guess_category("  electric ") == "electrician"
     assert guess_category("Electrician") == "electrician"
     assert guess_category("Cable pull team leader") == "long_distance_lead"
+    assert guess_category("Engineer") == "engineer"
+    assert guess_category("Mérnök") == "engineer"
+    assert guess_category("Warehouse manager") == "warehouse_manager"
+    assert guess_category("Wharehouse manager") == "warehouse_manager"
+    assert guess_category("Lakatos csoportvezető") == "iron_worker_lead"
+    assert guess_category("Iron worker") == "iron_worker"
+    assert guess_category("Lakatos") == "iron_worker"
+    assert guess_category("Site Manager") == "site_manager"
+    assert guess_category("Építésvezető") == "site_manager"
+    assert guess_category("Office") == "administration"
     assert guess_category("Team lead") is None
-    assert guess_category("Iron worker") is None
     assert guess_category(None) is None
 
 
@@ -39,7 +48,7 @@ def test_manual_override_wins_and_survives_new_people_list(db):
     people = [
         {"id": "Anna", "name": "Anna", "position": "Cable puller", "is_lead": False},
         {"id": "Béla", "name": "Béla", "position": "Team lead", "is_lead": True},
-        {"id": "Cili", "name": "Cili", "position": "Office", "is_lead": False},
+        {"id": "Cili", "name": "Cili", "position": "Helper", "is_lead": False},
     ]
     staffing_db.set_category(db, "anna", "local_cabling_lead", user_email="p@x")
     staffing_db.set_category(db, "Béla", "electrician_lead", user_email="p@x")
@@ -59,6 +68,59 @@ def test_manual_override_wins_and_survives_new_people_list(db):
     assert anna["category"] == "cable_puller"
     assert anna["category_source"] == "auto"
     assert anna["is_lead"] is False
+
+
+def test_roster_meta_afternoon_and_project_survives_people_reload(db):
+    people = [
+        {"id": "Anna", "name": "Anna", "position": "Cable puller", "is_lead": False},
+        {"id": "Béla", "name": "Béla", "position": "Electrician", "is_lead": False},
+    ]
+    meta = staffing_db.set_roster_meta(
+        db, "anna", afternoon=True, project="598", user_email="p@x"
+    )
+    assert meta == {"afternoon": True, "project": "598"}
+    with pytest.raises(staffing_db.StaffingError):
+        staffing_db.set_roster_meta(db, "Béla", afternoon=False, project="999", user_email="p@x")
+
+    by = {p["name"]: p for p in staffing_db.people_with_categories(db, people)}
+    assert by["Anna"]["afternoon"] is True
+    assert by["Anna"]["project"] == "598"
+    assert by["Béla"]["afternoon"] is False
+    assert by["Béla"]["project"] is None
+
+    cleared = staffing_db.set_roster_meta(
+        db, "Anna", afternoon=False, project=None, user_email="p@x"
+    )
+    assert cleared == {"afternoon": False, "project": None}
+    anna = staffing_db.people_with_categories(db, people)[0]
+    assert anna["afternoon"] is False
+    assert anna["project"] is None
+
+
+def test_roster_meta_legacy_unsorted_key_still_applies(db):
+    """Old DB rows used casefold-without-sort; identity key must still find them."""
+    from apps.api.models import WorkerRosterMeta
+
+    db.add(
+        WorkerRosterMeta(
+            person_key="brewka patryk daniel",
+            afternoon=True,
+            project="598",
+            updated_by="legacy@x",
+        )
+    )
+    db.commit()
+    people = [
+        {
+            "id": "Patryk Daniel Brewka",
+            "name": "Patryk Daniel Brewka",
+            "position": "Cable puller",
+            "is_lead": False,
+        }
+    ]
+    by = {p["name"]: p for p in staffing_db.people_with_categories(db, people)}
+    assert by["Patryk Daniel Brewka"]["afternoon"] is True
+    assert by["Patryk Daniel Brewka"]["project"] == "598"
 
 
 def test_normalize_requirements():

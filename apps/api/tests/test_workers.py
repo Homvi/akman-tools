@@ -31,6 +31,7 @@ BOARD = {
             "blocker": True,
             "blocker_note": "tray missing",
         },
+        {"id": "t3", "title": "Pull 4012", "lead_id": "Kovács Anna", "worker_ids": ["Cecil"]},
     ]
 }
 
@@ -49,6 +50,17 @@ def detail(db, name="Kovács Anna"):
     return svc.get_worker_detail(db, name, people=PEOPLE, board=BOARD)
 
 
+def test_person_key_order_case_and_accents():
+    assert svc.person_key("Brewka Patryk Daniel") == svc.person_key("Patryk Daniel Brewka")
+    assert svc.person_key("Brewka Patryk Daniel") == svc.person_key("patryk daniel BREWKA")
+    assert svc.person_key("Kovács Anna") == svc.person_key("Anna Kovacs")
+    assert svc.person_key("Kovács Anna") == svc.person_key("  kovács   ANNA ")
+    # Different token counts stay distinct.
+    assert svc.person_key("Brewka Patryk") != svc.person_key("Brewka Patryk Daniel")
+    assert svc.person_key("") == ""
+    assert svc.person_key("   ") == ""
+
+
 def test_detail_merges_workforce_and_current_task(db):
     d = detail(db, "  kovács   ANNA ")
     assert d["name"] == "Kovács Anna"
@@ -57,6 +69,8 @@ def test_detail_merges_workforce_and_current_task(db):
     assert d["current_task"]["title"] == "HV feeders"
     assert d["current_task"]["role"] == "lead"
     assert d["current_task"]["blocker_note"] == "tray missing"
+    assert [t["title"] for t in d["tasks"]] == ["HV feeders", "Pull 4012"]
+    assert {t["role"] for t in d["tasks"]} == {"lead"}
     assert d["rating"] == {"average": None, "count": 0}
 
 

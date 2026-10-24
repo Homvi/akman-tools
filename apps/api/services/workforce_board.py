@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from apps.api.config import settings
+from apps.api.services.person_names import person_key
 from src.staffing_categories import normalize_requirements
 
 _WF_PATH = "workforce.parquet"
@@ -202,42 +203,99 @@ def _leave_ranges(person_rows: pd.DataFrame, *, from_day: date) -> list[dict[str
     ]
 
 
+def _prepare_people_view(frame: pd.DataFrame) -> pd.DataFrame | None:
+    """Clean names/dates/positions and attach identity key column ``_ikey``."""
+    if frame is None or frame.empty or "Name" not in frame.columns:
+        return None
+    view = frame.copy()
+    view["Name"] = view["Name"].map(_clean_name)
+    view = view[view["Name"] != ""]
+    if view.empty:
+        return None
+    if "Date" not in view.columns:
+        return None
+    view["Date"] = pd.to_datetime(view["Date"], errors="coerce")
+    view = view.dropna(subset=["Date"])
+    if view.empty:
+        return None
+    if "Position" in view.columns:
+        view["Position"] = view["Position"].map(_clean_position)
+    else:
+        view["Position"] = ""
+    canon = _canonical_positions(view["Position"].tolist())
+    view["Position"] = view["Position"].map(lambda p: canon.get(str(p).casefold(), p) if p else "")
+    view["_ikey"] = view["Name"].map(person_key)
+    view = view[view["_ikey"] != ""]
+    return view if not view.empty else None
+
+
+def canonical_names_from_frame(df: pd.DataFrame | None = None) -> dict[str, str]:
+    """Map ``person_key`` → latest display spelling from the workforce frame."""
+    frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
+    view = _prepare_people_view(frame) if frame is not None else None
+    if view is None:
+        return {}
+    out: dict[str, str] = {}
+    for _, row in view.sort_values("Date", ascending=False).iterrows():
+        key = str(row["_ikey"])
+        if key not in out:
+            out[key] = str(row["Name"])
+    return out
+
+
+def remap_board_person_names(
+    board: dict[str, Any],
+    canonical_by_identity: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Rewrite lead/worker ids to the canonical display name for each identity."""
+    canon = canonical_by_identity if canonical_by_identity is not None else canonical_names_from_frame()
+    if not canon:
+        return board
+
+    def resolve(raw: str | None) -> str | None:
+        if raw in (None, ""):
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        return canon.get(person_key(text), text)
+
+    tasks: list[dict[str, Any]] = []
+    for task in board.get("tasks") or []:
+        if not isinstance(task, dict):
+            continue
+        t = dict(task)
+        lead = resolve(t.get("lead_id"))
+        seen: set[str] = set()
+        workers: list[str] = []
+        for wid in t.get("worker_ids") or []:
+            pid = resolve(str(wid) if wid is not None else None)
+            if not pid or pid == lead or pid in seen:
+                continue
+            seen.add(pid)
+            workers.append(pid)
+        t["lead_id"] = lead
+        t["worker_ids"] = workers
+        tasks.append(t)
+    return {**board, "tasks": tasks}
+
+
 def list_people(
     df: pd.DataFrame | None = None,
     *,
     as_of: date | None = None,
     inactive_days: int = _INACTIVE_DAYS,
 ) -> list[dict[str, Any]]:
-    """Unique people from workforce Excel (latest position wins).
+    """Unique people from workforce Excel (latest position / name spelling wins).
 
-    Keeps anyone who either worked recently (``Present`` within ``inactive_days``)
-    or still appears on a roster row on/after the cutoff — so newly added names
-    without a work mark yet are not dropped. Older inactive people stay hidden.
+    Dedupes by token identity (order-/case-/accent-insensitive). Keeps anyone who
+    either worked recently (``Present`` within ``inactive_days``) or still appears
+    on a roster row on/after the cutoff.
     """
     frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
-    if frame is None or frame.empty or "Name" not in frame.columns:
+    view = _prepare_people_view(frame) if frame is not None else None
+    if view is None:
         return []
-
-    view = frame.copy()
-    view["Name"] = view["Name"].map(_clean_name)
-    view = view[view["Name"] != ""]
-    if view.empty:
-        return []
-
-    if "Date" in view.columns:
-        view["Date"] = pd.to_datetime(view["Date"], errors="coerce")
-        view = view.dropna(subset=["Date"])
-    else:
-        return []
-
-    if "Position" in view.columns:
-        view["Position"] = view["Position"].map(_clean_position)
-    else:
-        view["Position"] = ""
-
-    # Collapse "Iron worker" / "Iron Worker" (and similar) into one chip label.
-    canon = _canonical_positions(view["Position"].tolist())
-    view["Position"] = view["Position"].map(lambda p: canon.get(str(p).casefold(), p) if p else "")
 
     day = as_of or staffing_as_of(view)
     if day is None:
@@ -245,27 +303,24 @@ def list_people(
     day_ts = pd.Timestamp(day).normalize()
     cutoff = day_ts - pd.Timedelta(days=int(inactive_days))
 
-    present_mask = view["Present"].map(_is_present_cell) if "Present" in view.columns else pd.Series(False, index=view.index)
-    last_present = (
-        view.loc[present_mask]
-        .groupby(view.loc[present_mask, "Name"].str.casefold())["Date"]
-        .max()
+    present_mask = (
+        view["Present"].map(_is_present_cell) if "Present" in view.columns else pd.Series(False, index=view.index)
     )
-    last_seen = view.groupby(view["Name"].str.casefold())["Date"].max()
+    last_present = view.loc[present_mask].groupby("_ikey")["Date"].max()
+    last_seen = view.groupby("_ikey")["Date"].max()
 
-    present_names: set[str] = set()
+    present_keys: set[str] = set()
     day_rows = view[view["Date"].dt.normalize().eq(day_ts)]
     for _, row in day_rows.iterrows():
         if _is_present_cell(row.get("Present")):
-            present_names.add(str(row["Name"]))
+            present_keys.add(str(row["_ikey"]))
 
-    # Latest position: walk newest → oldest
+    # Latest spelling + position: walk newest → oldest per identity
     newest_first = view.sort_values("Date", ascending=False)
     people: list[dict[str, Any]] = []
     seen: set[str] = set()
     for _, row in newest_first.iterrows():
-        name = str(row["Name"])
-        key = name.casefold()
+        key = str(row["_ikey"])
         if key in seen:
             continue
         seen.add(key)
@@ -273,7 +328,6 @@ def list_people(
         last = last_present.get(key)
         seen_at = last_seen.get(key)
         worked_recently = last is not None and not pd.isna(last) and pd.Timestamp(last) >= cutoff
-        # New roster lines (or leave-only) with no Present mark yet — still show them.
         listed_recently = (
             not worked_recently
             and seen_at is not None
@@ -283,16 +337,17 @@ def list_people(
         if not worked_recently and not listed_recently:
             continue
 
+        name = str(row["Name"])
         position = str(row.get("Position") or "")
-        available = name in present_names
-        person_rows = view[view["Name"].str.casefold() == key]
+        available = key in present_keys
+        person_rows = view[view["_ikey"] == key]
         leave_start, leave_end = _leave_window(person_rows, from_day=day)
         leave_ranges = _leave_ranges(person_rows, from_day=day)
         on_leave_now = False
         if leave_start and leave_end and leave_start <= day <= leave_end:
             on_leave_now = True
         elif not available and "Status" in day_rows.columns:
-            person_today = day_rows[day_rows["Name"].str.casefold() == key]
+            person_today = day_rows[day_rows["_ikey"] == key]
             if not person_today.empty and str(person_today.iloc[0].get("Status") or "").lower() == "leave":
                 on_leave_now = True
 
@@ -340,7 +395,7 @@ def load_board() -> dict[str, Any]:
         return _empty_board()
     if not isinstance(data, dict):
         return _empty_board()
-    return normalize_board(data)
+    return remap_board_person_names(normalize_board(data))
 
 
 def _new_id(prefix: str) -> str:
@@ -476,7 +531,6 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not looks_new and (raw.get("teams") or raw.get("assignments")):
         tasks_in = _migrate_legacy_board(raw)
 
-    claimed: set[str] = set()
     tasks: list[dict[str, Any]] = []
     for i, item in enumerate(tasks_in):
         if not isinstance(item, dict):
@@ -492,21 +546,20 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
 
         lead_raw = item.get("lead_id")
         lead_id = None if lead_raw in (None, "", "null") else str(lead_raw).strip()
-        if lead_id and lead_id in claimed:
-            lead_id = None
-        if lead_id:
-            claimed.add(lead_id)
 
+        # Same person may lead / work on multiple tasks. Within one task only:
+        # unique workers, and lead is not also listed as a worker.
         workers_src = item.get("worker_ids")
         if not isinstance(workers_src, list):
             # Back-compat: assignee_ids without lead
             workers_src = item.get("assignee_ids") if isinstance(item.get("assignee_ids"), list) else []
+        seen_workers: set[str] = set()
         worker_ids: list[str] = []
         for aid in workers_src:
             pid = str(aid or "").strip()
-            if not pid or pid in claimed or pid == lead_id:
+            if not pid or pid == lead_id or pid in seen_workers:
                 continue
-            claimed.add(pid)
+            seen_workers.add(pid)
             worker_ids.append(pid)
 
         start_date, end_date = _parse_date_range(item)
@@ -536,7 +589,7 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def save_board(payload: dict[str, Any] | None) -> dict[str, Any]:
-    board = normalize_board(payload)
+    board = remap_board_person_names(normalize_board(payload))
     path = board_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(board, ensure_ascii=False, indent=2), encoding="utf-8")

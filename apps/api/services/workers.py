@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from apps.api.config import settings
 from apps.api.models import WorkerCategory, WorkerNote, WorkerProfile, WorkerRating
 from apps.api.services import workforce_board as board_svc
+from apps.api.services.person_names import name_identity_key, person_key
 from src.staffing_categories import apply_categories
 
 MAX_PHOTO_BYTES = 5 * 1024 * 1024
@@ -28,10 +29,6 @@ class WorkerError(ValueError):
 
 class WorkerNotFound(LookupError):
     """Unknown worker (maps to HTTP 404)."""
-
-
-def person_key(name: str) -> str:
-    return " ".join(str(name or "").split()).casefold()
 
 
 def photos_dir() -> Path:
@@ -63,29 +60,60 @@ def normalize_languages(values: list[Any] | None) -> list[str]:
 
 
 def _get_profile(db: Session, key: str) -> WorkerProfile | None:
-    return db.query(WorkerProfile).filter(WorkerProfile.person_key == key).first()
-
-
-def _current_task(board: dict[str, Any], name: str) -> dict[str, Any] | None:
-    key = person_key(name)
-    for task in board.get("tasks") or []:
-        role = None
-        if person_key(task.get("lead_id") or "") == key:
-            role = "lead"
-        elif any(person_key(w) == key for w in task.get("worker_ids") or []):
-            role = "worker"
-        if role:
-            return {
-                "id": task.get("id"),
-                "title": task.get("title"),
-                "role": role,
-                "start_date": task.get("start_date"),
-                "end_date": task.get("end_date"),
-                "blocker": bool(task.get("blocker")),
-                "blocker_note": task.get("blocker_note") or "",
-                "done": bool(task.get("done")),
-            }
+    row = db.query(WorkerProfile).filter(WorkerProfile.person_key == key).first()
+    if row is not None:
+        return row
+    for candidate in db.query(WorkerProfile).all():
+        if person_key(candidate.person_key) == key:
+            candidate.person_key = key
+            return candidate
     return None
+
+
+def _entries_for_key(db: Session, model: type, key: str) -> list[Any]:
+    """Ratings/notes matching identity key, including legacy unsorted person_key rows."""
+    exact = (
+        db.query(model)
+        .filter(model.person_key == key)
+        .order_by(model.created_at.desc(), model.id.desc())
+        .all()
+    )
+    if exact:
+        return exact
+    rows = [
+        r
+        for r in db.query(model).order_by(model.created_at.desc(), model.id.desc()).all()
+        if person_key(r.person_key) == key
+    ]
+    for r in rows:
+        r.person_key = key
+    return rows
+
+
+def _task_assignment(task: dict[str, Any], role: str) -> dict[str, Any]:
+    return {
+        "id": task.get("id"),
+        "title": task.get("title"),
+        "role": role,
+        "start_date": task.get("start_date"),
+        "end_date": task.get("end_date"),
+        "blocker": bool(task.get("blocker")),
+        "blocker_note": task.get("blocker_note") or "",
+        "done": bool(task.get("done")),
+    }
+
+
+def _assigned_tasks(board: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    """All tasks this person leads, plus the one task they work on (if any)."""
+    key = person_key(name)
+    led: list[dict[str, Any]] = []
+    worker: dict[str, Any] | None = None
+    for task in board.get("tasks") or []:
+        if person_key(task.get("lead_id") or "") == key:
+            led.append(_task_assignment(task, "lead"))
+        elif worker is None and any(person_key(w) == key for w in task.get("worker_ids") or []):
+            worker = _task_assignment(task, "worker")
+    return [*led, *([worker] if worker else [])]
 
 
 def get_worker_detail(
@@ -103,33 +131,28 @@ def get_worker_detail(
         people = board_svc.list_people(frame) if frame is not None else []
     person = next((p for p in people if person_key(p.get("name", "")) == key), None)
     if person is not None:
-        overrides = {row.person_key: row.category for row in db.query(WorkerCategory).all()}
+        from apps.api.services import staffing_db as staffing_svc
+
+        overrides = staffing_svc.category_overrides(db)
         person = apply_categories([person], overrides, key_of=person_key)[0]
+        person = staffing_svc.apply_roster_meta(db, [person])[0]
     profile = _get_profile(db, key)
     if person is None and profile is None:
         raise WorkerNotFound(name)
 
-    ratings = (
-        db.query(WorkerRating)
-        .filter(WorkerRating.person_key == key)
-        .order_by(WorkerRating.created_at.desc(), WorkerRating.id.desc())
-        .all()
-    )
-    notes = (
-        db.query(WorkerNote)
-        .filter(WorkerNote.person_key == key)
-        .order_by(WorkerNote.created_at.desc(), WorkerNote.id.desc())
-        .all()
-    )
+    ratings = _entries_for_key(db, WorkerRating, key)
+    notes = _entries_for_key(db, WorkerNote, key)
     average = round(sum(r.stars for r in ratings) / len(ratings), 2) if ratings else None
     display = (person or {}).get("name") or (profile.display_name if profile else "") or name
+    assigned = _assigned_tasks(board if board is not None else board_svc.load_board(), display)
 
     return {
         "name": display,
         "key": key,
         "in_workforce": person is not None,
         "person": person,
-        "current_task": _current_task(board if board is not None else board_svc.load_board(), display),
+        "tasks": assigned,
+        "current_task": assigned[0] if assigned else None,
         "profile": {
             "phone": profile.phone if profile else "",
             "address": profile.address if profile else "",
