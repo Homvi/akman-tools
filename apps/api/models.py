@@ -51,6 +51,42 @@ class Dataset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkerProfile(Base):
+    __tablename__ = "worker_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    phone: Mapped[str] = mapped_column(String(64), default="")
+    address: Mapped[str] = mapped_column(String(512), default="")
+    languages_json: Mapped[str] = mapped_column(Text, default="[]")
+    photo_path: Mapped[str] = mapped_column(String(1024), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkerRating(Base):
+    __tablename__ = "worker_ratings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_key: Mapped[str] = mapped_column(String(255), index=True)
+    stars: Mapped[int] = mapped_column(Integer)
+    comment: Mapped[str] = mapped_column(Text, default="")
+    author_email: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkerNote(Base):
+    __tablename__ = "worker_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_key: Mapped[str] = mapped_column(String(255), index=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    author_email: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AreasSettings(Base):
     __tablename__ = "areas_settings"
 

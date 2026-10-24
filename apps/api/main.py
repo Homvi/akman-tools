@@ -24,6 +24,7 @@ from apps.api.routers import (
     stichmass,
     stopped,
     stutzen,
+    workers,
     workforce,
 )
 from apps.api.services.bootstrap import ensure_roles_and_admin
@@ -68,6 +69,7 @@ app.include_router(workforce.router)
 app.include_router(areas.router)
 app.include_router(routes.router)
 app.include_router(notifications.router)
+app.include_router(workers.router)
 
 
 @app.get("/health")
