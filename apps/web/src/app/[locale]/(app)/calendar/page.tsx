@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 import { Link } from "@/i18n/routing";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -66,17 +66,28 @@ export default function CalendarPage() {
     return new Date(now.getFullYear(), now.getMonth(), 1, 12);
   });
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [latestNote, setLatestNote] = useState<Record<string, { count: number; text: string }>>({});
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [boardRes, peopleRes] = await Promise.all([
+      const [boardRes, peopleRes, notesRes] = await Promise.all([
         api.get<Board>("/workforce/board"),
         api.get<{ people: Person[] }>("/workforce/people").catch(() => ({ people: [] as Person[] })),
+        api
+          .get<Record<string, { text: string }[]>>("/workforce/board/notes")
+          .catch(() => ({}) as Record<string, { text: string }[]>),
       ]);
       setBoard({ tasks: (boardRes.tasks || []).map((task) => normalizeTask(task)) });
       setPeople(peopleRes.people || []);
+      setLatestNote(
+        Object.fromEntries(
+          Object.entries(notesRes || {})
+            .filter(([, list]) => list.length)
+            .map(([id, list]) => [id, { count: list.length, text: list[0].text }])
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : tc("loadFailed"));
     } finally {
@@ -254,6 +265,7 @@ export default function CalendarPage() {
           items={scheduled.filter((s) => s.start <= selectedDay && s.end >= selectedDay)}
           peopleById={peopleById}
           conflictCount={conflictCount}
+          latestNote={latestNote}
         />
       )}
 
@@ -601,12 +613,14 @@ function DayPanel({
   items,
   peopleById,
   conflictCount,
+  latestNote,
 }: {
   day: Date;
   title: string;
   items: Scheduled[];
   peopleById: Map<string, Person>;
   conflictCount: (task: Task) => number;
+  latestNote: Record<string, { count: number; text: string }>;
 }) {
   const t = useTranslations("calendar");
   const locale = useLocale();
@@ -650,6 +664,13 @@ function DayPanel({
                     {t("conflicts", { count: conflicts })}
                   </div>
                 )}
+                {latestNote[item.task.id] ? (
+                  <div className="mt-0.5 flex items-center gap-1 text-[11px] text-[#A1A1AA]">
+                    <MessageSquare className="h-3 w-3 shrink-0" />
+                    <span className="shrink-0">{t("notesCount", { count: latestNote[item.task.id].count })}</span>
+                    <span className="truncate text-[#71717A]">· {latestNote[item.task.id].text}</span>
+                  </div>
+                ) : null}
               </li>
             );
           })}
