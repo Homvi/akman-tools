@@ -15,7 +15,6 @@ from src.staffing_categories import normalize_requirements
 
 _WF_PATH = "workforce.parquet"
 _BOARD_PATH = "workforce_board.json"
-_INACTIVE_DAYS = 21
 
 _LEAD_RE = re.compile(
     r"(team\s*lead|csoportvezet|group\s*lead|vorarbeiter|\blead\b|leiter)",
@@ -24,7 +23,7 @@ _LEAD_RE = re.compile(
 
 # Process-local caches (mtime/size keyed). Cleared on Excel upload / meta writes.
 _FRAME_CACHE: dict[str, Any] = {"sig": None, "frame": None}
-_PEOPLE_CACHE: dict[str, Any] = {"sig": None, "as_of": None, "inactive_days": None, "people": None}
+_PEOPLE_CACHE: dict[str, Any] = {"sig": None, "as_of": None, "people": None, "off_roster": None}
 
 
 def workforce_parquet_path() -> Path:
@@ -40,8 +39,93 @@ def clear_workforce_cache() -> None:
     _FRAME_CACHE["frame"] = None
     _PEOPLE_CACHE["sig"] = None
     _PEOPLE_CACHE["as_of"] = None
-    _PEOPLE_CACHE["inactive_days"] = None
     _PEOPLE_CACHE["people"] = None
+    _PEOPLE_CACHE["off_roster"] = None
+
+
+def ensure_project_column(frame: pd.DataFrame) -> pd.DataFrame:
+    """Guarantee a ``Project`` column; missing/blank → main roster (None)."""
+    out = frame.copy()
+    if "Project" not in out.columns:
+        out["Project"] = None
+    else:
+        out["Project"] = out["Project"].map(
+            lambda v: None
+            if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() in {"", "nan", "None"}
+            else str(v).strip()
+        )
+    return out
+
+
+def _project_mask(frame: pd.DataFrame, project: str | None) -> pd.Series:
+    """Rows belonging to ``project`` (None = main / untagged roster)."""
+    col = frame["Project"]
+    if project is None:
+        return col.isna() | col.astype(str).str.strip().isin({"", "nan", "None"})
+    return col.astype(str).str.strip().eq(str(project).strip())
+
+
+# When the same person+day appears on multiple sheets (e.g. September blank
+# October columns vs October ``u`` leave), keep the most informative status.
+_STATUS_RANK = {
+    "leave": 0,
+    "sick": 1,
+    "work": 2,
+    "off": 3,
+    "empty": 4,
+}
+
+
+def dedupe_workforce_days(frame: pd.DataFrame) -> pd.DataFrame:
+    """One row per Date + person; prefer leave/work over empty placeholders."""
+    if frame is None or frame.empty:
+        return frame
+    work = frame.copy()
+    work["Date"] = pd.to_datetime(work["Date"], errors="coerce")
+    work = work.dropna(subset=["Date"])
+    if "Name" not in work.columns:
+        return work
+    work["_ikey"] = work["Name"].map(lambda n: person_key(str(n or "")))
+    work = work[work["_ikey"] != ""]
+    if work.empty:
+        return work.drop(columns=["_ikey"], errors="ignore")
+    status = work["Status"].astype(str).str.lower() if "Status" in work.columns else "empty"
+    work["_rank"] = status.map(lambda s: _STATUS_RANK.get(str(s), 5))
+    # Stable: best status first; then later sheet rows win ties.
+    work = work.sort_values(["Date", "_ikey", "_rank"], kind="mergesort")
+    work = work.drop_duplicates(subset=["Date", "_ikey"], keep="first")
+    return work.drop(columns=["_ikey", "_rank"]).sort_values(["Date", "Position", "Name"]).reset_index(drop=True)
+
+
+def merge_workforce_upload(
+    existing: pd.DataFrame | None,
+    incoming: pd.DataFrame,
+    *,
+    project: str | None,
+) -> pd.DataFrame:
+    """Replace rows for one project slice; keep all other project slices.
+
+    Dedupes on Date + person identity, preferring leave/work over empty.
+    """
+    incoming = ensure_project_column(incoming)
+    if project:
+        incoming = incoming.copy()
+        incoming["Project"] = str(project).strip()
+    else:
+        incoming = incoming.copy()
+        incoming["Project"] = None
+
+    if existing is None or existing.empty:
+        kept = incoming
+    else:
+        base = ensure_project_column(existing)
+        keep = base.loc[~_project_mask(base, project)]
+        kept = pd.concat([keep, incoming], ignore_index=True)
+
+    if kept.empty:
+        return kept
+
+    return dedupe_workforce_days(kept)
 
 
 def _parquet_signature() -> str | None:
@@ -70,12 +154,15 @@ def load_workforce_frame() -> pd.DataFrame | None:
         return None
     if _FRAME_CACHE["sig"] == sig and _FRAME_CACHE["frame"] is not None:
         return _FRAME_CACHE["frame"]
-    frame = pd.read_parquet(workforce_parquet_path())
+    frame = ensure_project_column(pd.read_parquet(workforce_parquet_path()))
+    # Heal older uploads where blank September day-columns wiped October leave.
+    frame = dedupe_workforce_days(frame)
     _FRAME_CACHE["sig"] = sig
     _FRAME_CACHE["frame"] = frame
     # People list depends on the frame; drop stale people cache.
     _PEOPLE_CACHE["sig"] = None
     _PEOPLE_CACHE["people"] = None
+    _PEOPLE_CACHE["off_roster"] = None
     return frame
 
 
@@ -313,46 +400,43 @@ def remap_board_person_names(
     return {**board, "tasks": tasks}
 
 
-def list_people(
-    df: pd.DataFrame | None = None,
+def _shift_month(day: date, delta: int) -> date:
+    """First day of the calendar month ``delta`` months from ``day``'s month."""
+    month_index = day.month - 1 + delta
+    year = day.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, 1)
+
+
+def _keys_in_calendar_month(view: pd.DataFrame, year: int, month: int) -> set[str]:
+    dates = view["Date"]
+    mask = (dates.dt.year == year) & (dates.dt.month == month)
+    if not mask.any():
+        return set()
+    return set(view.loc[mask, "_ikey"].astype(str).tolist())
+
+
+def roster_months(as_of: date) -> tuple[date, date]:
+    """Return (current_month_start, next_month_start) for roster membership."""
+    current = date(as_of.year, as_of.month, 1)
+    return current, _shift_month(as_of, 1)
+
+
+def _build_people_for_keys(
+    view: pd.DataFrame,
     *,
-    as_of: date | None = None,
-    inactive_days: int = _INACTIVE_DAYS,
+    keys: set[str],
+    day: date,
 ) -> list[dict[str, Any]]:
-    """Unique people from workforce Excel (latest position / name spelling wins).
-
-    Dedupes by token identity (order-/case-/accent-insensitive). Keeps anyone who
-    either worked recently (``Present`` within ``inactive_days``) or still appears
-    on a roster row on/after the cutoff.
-    """
-    use_cache = df is None
-    sig = _parquet_signature() if use_cache else None
-    if (
-        use_cache
-        and sig
-        and _PEOPLE_CACHE["sig"] == sig
-        and _PEOPLE_CACHE["as_of"] == (as_of.isoformat() if as_of else None)
-        and _PEOPLE_CACHE["inactive_days"] == int(inactive_days)
-        and _PEOPLE_CACHE["people"] is not None
-    ):
-        return list(_PEOPLE_CACHE["people"])
-
-    frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
-    view = _prepare_people_view(frame) if frame is not None else None
-    if view is None:
+    """Build person dicts for the given identity keys (latest spelling wins)."""
+    if not keys:
         return []
 
-    day = as_of or staffing_as_of(view)
-    if day is None:
-        return []
     day_ts = pd.Timestamp(day).normalize()
-    cutoff = day_ts - pd.Timedelta(days=int(inactive_days))
-
     present_mask = (
         view["Present"].map(_is_present_cell) if "Present" in view.columns else pd.Series(False, index=view.index)
     )
     last_present = view.loc[present_mask].groupby("_ikey")["Date"].max()
-    last_seen = view.groupby("_ikey")["Date"].max()
 
     present_keys: set[str] = set()
     day_rows = view[view["Date"].dt.normalize().eq(day_ts)]
@@ -360,28 +444,16 @@ def list_people(
         if _is_present_cell(row.get("Present")):
             present_keys.add(str(row["_ikey"]))
 
-    # Latest spelling + position: walk newest → oldest per identity
     newest_first = view.sort_values("Date", ascending=False)
     people: list[dict[str, Any]] = []
     seen: set[str] = set()
     for _, row in newest_first.iterrows():
         key = str(row["_ikey"])
-        if key in seen:
+        if key in seen or key not in keys:
             continue
         seen.add(key)
 
         last = last_present.get(key)
-        seen_at = last_seen.get(key)
-        worked_recently = last is not None and not pd.isna(last) and pd.Timestamp(last) >= cutoff
-        listed_recently = (
-            not worked_recently
-            and seen_at is not None
-            and not pd.isna(seen_at)
-            and pd.Timestamp(seen_at) >= cutoff
-        )
-        if not worked_recently and not listed_recently:
-            continue
-
         name = str(row["Name"])
         position = str(row.get("Position") or "")
         available = key in present_keys
@@ -423,11 +495,98 @@ def list_people(
             p["name"].casefold(),
         )
     )
+    return people
+
+
+def _people_view_and_day(
+    df: pd.DataFrame | None,
+    *,
+    as_of: date | None,
+) -> tuple[pd.DataFrame | None, date | None]:
+    frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
+    view = _prepare_people_view(frame) if frame is not None else None
+    if view is None:
+        return None, None
+    day = as_of or staffing_as_of(view)
+    return view, day
+
+
+def list_people(
+    df: pd.DataFrame | None = None,
+    *,
+    as_of: date | None = None,
+) -> list[dict[str, Any]]:
+    """Unique people on the current calendar month's roster (névsor).
+
+    Dedupes by token identity (order-/case-/accent-insensitive). A person is
+    included if they have any Excel row in the month of ``as_of`` (or
+    ``staffing_as_of``), including leave/empty cells.
+    """
+    use_cache = df is None
+    sig = _parquet_signature() if use_cache else None
+    as_of_key = as_of.isoformat() if as_of else None
+    if (
+        use_cache
+        and sig
+        and _PEOPLE_CACHE["sig"] == sig
+        and _PEOPLE_CACHE["as_of"] == as_of_key
+        and _PEOPLE_CACHE["people"] is not None
+    ):
+        return list(_PEOPLE_CACHE["people"])
+
+    view, day = _people_view_and_day(df, as_of=as_of)
+    if view is None or day is None:
+        return []
+
+    current_month, _ = roster_months(day)
+    keys = _keys_in_calendar_month(view, current_month.year, current_month.month)
+    people = _build_people_for_keys(view, keys=keys, day=day)
+
     if use_cache and sig:
+        if _PEOPLE_CACHE["sig"] != sig or _PEOPLE_CACHE["as_of"] != as_of_key:
+            _PEOPLE_CACHE["off_roster"] = None
         _PEOPLE_CACHE["sig"] = sig
-        _PEOPLE_CACHE["as_of"] = as_of.isoformat() if as_of else None
-        _PEOPLE_CACHE["inactive_days"] = int(inactive_days)
+        _PEOPLE_CACHE["as_of"] = as_of_key
         _PEOPLE_CACHE["people"] = people
+    return people
+
+
+def list_off_roster_people(
+    df: pd.DataFrame | None = None,
+    *,
+    as_of: date | None = None,
+) -> list[dict[str, Any]]:
+    """People who appear in the Excel but not in the current or next month roster."""
+    use_cache = df is None
+    sig = _parquet_signature() if use_cache else None
+    as_of_key = as_of.isoformat() if as_of else None
+    if (
+        use_cache
+        and sig
+        and _PEOPLE_CACHE["sig"] == sig
+        and _PEOPLE_CACHE["as_of"] == as_of_key
+        and _PEOPLE_CACHE["off_roster"] is not None
+    ):
+        return list(_PEOPLE_CACHE["off_roster"])
+
+    view, day = _people_view_and_day(df, as_of=as_of)
+    if view is None or day is None:
+        return []
+
+    current_month, next_month = roster_months(day)
+    current_keys = _keys_in_calendar_month(view, current_month.year, current_month.month)
+    next_keys = _keys_in_calendar_month(view, next_month.year, next_month.month)
+    all_keys = set(view["_ikey"].astype(str).tolist())
+    off_keys = all_keys - current_keys - next_keys
+    people = _build_people_for_keys(view, keys=off_keys, day=day)
+
+    if use_cache and sig:
+        # Keep people cache in sync when both are filled via separate calls.
+        if _PEOPLE_CACHE["sig"] != sig or _PEOPLE_CACHE["as_of"] != as_of_key:
+            _PEOPLE_CACHE["sig"] = sig
+            _PEOPLE_CACHE["as_of"] = as_of_key
+            _PEOPLE_CACHE["people"] = None
+        _PEOPLE_CACHE["off_roster"] = people
     return people
 
 

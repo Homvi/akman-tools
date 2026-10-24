@@ -44,7 +44,8 @@ def test_list_people_latest_position_and_lead_flag():
     assert by_name["Dani"]["as_of"] == "2026-10-02"
 
 
-def test_list_people_hides_inactive_over_three_weeks():
+def test_list_people_current_month_roster_only():
+    """Active people = anyone with a row in the as_of calendar month."""
     from datetime import date
 
     df = pd.DataFrame(
@@ -52,15 +53,16 @@ def test_list_people_hides_inactive_over_three_weeks():
             {"Date": "2026-09-01", "Name": "Old", "Position": "Cable puller", "Present": True, "Status": "work"},
             {"Date": "2026-10-20", "Name": "Fresh", "Position": "Cable puller", "Present": True, "Status": "work"},
             {"Date": "2026-10-01", "Name": "Border", "Position": "Electrician", "Present": True, "Status": "work"},
+            {"Date": "2026-11-05", "Name": "NextOnly", "Position": "Helper", "Present": True, "Status": "work"},
         ]
     )
-    people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
+    people = board_svc.list_people(df, as_of=date(2026, 10, 23))
     names = {p["name"] for p in people}
-    assert names == {"Fresh"}
+    assert names == {"Fresh", "Border"}
 
 
 def test_list_people_keeps_new_names_without_present_mark():
-    """Roster rows in the active window must show up even with no work cell yet."""
+    """Roster rows in the current month must show up even with no work cell yet."""
     from datetime import date
 
     df = pd.DataFrame(
@@ -71,12 +73,30 @@ def test_list_people_keeps_new_names_without_present_mark():
             {"Date": "2026-09-01", "Name": "Gone", "Position": "Helper", "Present": False, "Status": ""},
         ]
     )
-    people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
+    people = board_svc.list_people(df, as_of=date(2026, 10, 23))
     by_name = {p["name"]: p for p in people}
     assert set(by_name) == {"OldHand", "NewHire", "OnLeave"}
     assert by_name["NewHire"]["last_present"] is None
     assert by_name["NewHire"]["available"] is False
     assert by_name["OnLeave"]["on_leave"] is True
+
+
+def test_list_off_roster_excludes_current_and_next_month():
+    from datetime import date
+
+    df = pd.DataFrame(
+        [
+            {"Date": "2026-08-10", "Name": "PastOnly", "Position": "Helper", "Present": True, "Status": "work"},
+            {"Date": "2026-09-15", "Name": "AlsoPast", "Position": "Helper", "Present": True, "Status": "work"},
+            {"Date": "2026-10-05", "Name": "Current", "Position": "Cable puller", "Present": True, "Status": "work"},
+            {"Date": "2026-11-02", "Name": "NextOnly", "Position": "Electrician", "Present": True, "Status": "work"},
+            {"Date": "2026-09-01", "Name": "Current", "Position": "Cable puller", "Present": True, "Status": "work"},
+        ]
+    )
+    off = board_svc.list_off_roster_people(df, as_of=date(2026, 10, 23))
+    assert {p["name"] for p in off} == {"PastOnly", "AlsoPast"}
+    current = board_svc.list_people(df, as_of=date(2026, 10, 23))
+    assert {p["name"] for p in current} == {"Current"}
 
 
 def test_list_people_merges_reordered_and_accented_names():
@@ -115,7 +135,7 @@ def test_list_people_merges_reordered_and_accented_names():
             },
         ]
     )
-    people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
+    people = board_svc.list_people(df, as_of=date(2026, 10, 23))
     by_name = {p["name"]: p for p in people}
     assert set(by_name) == {"Patryk Daniel Brewka", "Kovács Anna"}
     assert by_name["Patryk Daniel Brewka"]["available"] is True

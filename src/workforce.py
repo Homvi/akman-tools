@@ -284,10 +284,16 @@ def _header_col(header: pd.Series, *names: str, default: int) -> int:
     return default
 
 
-_EMPTY_COLS = ["Date", "Name", "Position", "Present", "Hours", "Status", "Sheet"]
+_EMPTY_COLS = ["Date", "Name", "Position", "Present", "Hours", "Status", "Sheet", "Project"]
 
 
-def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> pd.DataFrame:
+def parse_workforce_sheet(
+    raw: pd.DataFrame,
+    sheet_name: str,
+    *,
+    year: int,
+    project: str | None = None,
+) -> pd.DataFrame:
     header_row = _find_header_row(raw)
     if header_row is None:
         return pd.DataFrame(columns=_EMPTY_COLS)
@@ -300,6 +306,9 @@ def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> p
 
     name_col = _header_col(header, "name", default=1)
     pos_col = _header_col(header, "position", "skill", "profesion", "profession", default=2)
+    proj = str(project).strip() if project else None
+    if proj == "":
+        proj = None
 
     rows: list[dict] = []
     for r in range(header_row + 1, len(raw)):
@@ -328,19 +337,28 @@ def parse_workforce_sheet(raw: pd.DataFrame, sheet_name: str, *, year: int) -> p
                     "Hours": hours,
                     "Status": status,
                     "Sheet": sheet_name,
+                    "Project": proj,
                 }
             )
     return pd.DataFrame(rows)
 
 
-def parse_workforce_excel(source, *, year: int | None = None) -> pd.DataFrame:
-    """Parse all month sheets into a long presence table."""
+def parse_workforce_excel(
+    source,
+    *,
+    year: int | None = None,
+    project: str | None = None,
+) -> pd.DataFrame:
+    """Parse all month sheets into a long presence table.
+
+    ``project`` tags every row (e.g. ship ``600``); ``None`` = main roster.
+    """
     year = int(year or date.today().year)
     xl = pd.ExcelFile(source)
     frames = []
     for sheet in xl.sheet_names:
         raw = pd.read_excel(source, sheet_name=sheet, header=None)
-        part = parse_workforce_sheet(raw, sheet, year=year)
+        part = parse_workforce_sheet(raw, sheet, year=year, project=project)
         if not part.empty:
             frames.append(part)
     if not frames:

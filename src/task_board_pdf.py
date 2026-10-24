@@ -14,7 +14,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from src.staffing_categories import category_label, requirements_summary
 
@@ -298,8 +298,9 @@ def build_task_board_pdf(
     if not tasks:
         story.append(p(lbl["no_tasks"]))
 
-    # --- Tasks ---------------------------------------------------------------
+    # --- Tasks (one task per page) -------------------------------------------
     for task in tasks:
+        story.append(PageBreak())
         status = _status(task)
         start, end = _day(task.get("start_date")), _day(task.get("end_date"))
         worker_ids = [pid for pid in (task.get("worker_ids") or []) if pid]
@@ -416,7 +417,6 @@ def build_task_board_pdf(
         else:
             story.append(KeepTogether(block[:2]))
             story += block[2:]
-        story.append(Spacer(1, 6 * mm))
 
     def footer(canvas, doc):
         canvas.saveState()

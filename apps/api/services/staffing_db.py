@@ -65,11 +65,19 @@ def people_with_categories(db: Session, people: list[dict[str, Any]]) -> list[di
 
 
 def load_people(db: Session) -> list[dict[str, Any]] | None:
-    """Workforce people with categories applied, or None when no Excel is uploaded."""
+    """Current-month roster people with categories, or None when no Excel is uploaded."""
     frame = board_svc.load_workforce_frame()
     if frame is None:
         return None
     return people_with_categories(db, board_svc.list_people(frame))
+
+
+def load_off_roster(db: Session) -> list[dict[str, Any]]:
+    """People in the Excel who are on neither the current nor next month roster."""
+    frame = board_svc.load_workforce_frame()
+    if frame is None:
+        return []
+    return people_with_categories(db, board_svc.list_off_roster_people(frame))
 
 
 def _find_category_row(db: Session, key: str) -> WorkerCategory | None:
@@ -150,6 +158,96 @@ def set_roster_meta(
     db.commit()
     db.refresh(row)
     return {"afternoon": bool(row.afternoon), "project": row.project or None}
+
+
+def apply_default_project(
+    db: Session,
+    names: Iterable[str],
+    *,
+    project: str,
+    user_email: str,
+    skip_keys: set[str] | None = None,
+) -> int:
+    """Set ``project`` on roster meta for each person; keep existing afternoon flags."""
+    proj = str(project or "").strip()
+    if proj not in PROJECTS:
+        raise StaffingError("Unknown project")
+    skip = skip_keys or set()
+    updated = 0
+    seen: set[str] = set()
+    for name in names:
+        key = person_key(name)
+        if not key or key in seen or key in skip:
+            continue
+        seen.add(key)
+        row = _find_roster_meta_row(db, key)
+        if row is None:
+            row = WorkerRosterMeta(
+                person_key=key,
+                afternoon=False,
+                project=proj,
+                updated_by=user_email,
+            )
+            db.add(row)
+        else:
+            row.person_key = key
+            row.project = proj
+            row.updated_by = user_email
+        updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
+def names_on_sheet(frame: Any, sheet: str = "October") -> list[str]:
+    """Unique display names from rows whose Sheet matches ``sheet`` (case-insensitive)."""
+    import pandas as pd
+
+    if frame is None or getattr(frame, "empty", True) or "Name" not in getattr(frame, "columns", []):
+        return []
+    if "Sheet" not in frame.columns:
+        return []
+    target = str(sheet).casefold()
+    sheets = frame["Sheet"].map(lambda v: str(v or "").casefold())
+    mask = sheets.eq(target)
+    if not mask.any() and target == "october":
+        # Fallback: calendar October rows if the sheet tab was renamed.
+        dates = pd.to_datetime(frame["Date"], errors="coerce")
+        mask = dates.dt.month.eq(10)
+    if not mask.any():
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for name in frame.loc[mask, "Name"].dropna().astype(str).tolist():
+        key = person_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        names.append(name.strip())
+    return names
+
+
+def apply_ship_600_project_defaults(
+    db: Session,
+    *,
+    incoming: Any,
+    roster_names: Iterable[str],
+    user_email: str,
+) -> dict[str, int]:
+    """October sheet → project 600; everyone else on the roster → project 598."""
+    october_names = names_on_sheet(incoming, "October")
+    october_keys = {person_key(n) for n in october_names}
+    tagged_600 = apply_default_project(
+        db, october_names, project="600", user_email=user_email
+    )
+    tagged_598 = apply_default_project(
+        db,
+        roster_names,
+        project="598",
+        user_email=user_email,
+        skip_keys=october_keys,
+    )
+    return {"project_600": tagged_600, "project_598": tagged_598}
 
 
 def _iso(value: datetime | None) -> str | None:

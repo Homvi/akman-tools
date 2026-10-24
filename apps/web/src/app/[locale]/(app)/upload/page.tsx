@@ -86,11 +86,13 @@ export default function UploadPage() {
   const [progressFile, setProgressFile] = useState<File | null>(null);
   const [gesamtFile, setGesamtFile] = useState<File | null>(null);
   const [workforceFile, setWorkforceFile] = useState<File | null>(null);
+  const [workforce600File, setWorkforce600File] = useState<File | null>(null);
   const [areasFile, setAreasFile] = useState<File | null>(null);
   const [liveFile, setLiveFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [datasetMsg, setDatasetMsg] = useState<Feedback>(null);
   const [workforceMsg, setWorkforceMsg] = useState<Feedback>(null);
+  const [workforce600Msg, setWorkforce600Msg] = useState<Feedback>(null);
   const [areasMsg, setAreasMsg] = useState<Feedback>(null);
   const [liveMsg, setLiveMsg] = useState<Feedback>(null);
 
@@ -167,6 +169,39 @@ export default function UploadPage() {
       window.dispatchEvent(new Event("dataset-changed"));
     } catch (err) {
       setWorkforceMsg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadWorkforce600() {
+    if (!workforce600File) {
+      setWorkforce600Msg({ ok: false, text: t("needWorkforce600") });
+      return;
+    }
+    const form = new FormData();
+    form.append("file", workforce600File);
+    setLoading(true);
+    setWorkforce600Msg(null);
+    try {
+      const res = await api.post<{
+        rows: number;
+        people: number;
+        project_updated?: number;
+        project_598_updated?: number;
+      }>(`/workforce/upload?year=${new Date().getFullYear()}&project=600`, form);
+      setWorkforce600Msg({
+        ok: true,
+        text: t("workforce600Uploaded", {
+          people: res.people.toLocaleString(),
+          rows: res.rows.toLocaleString(),
+          tagged598: (res.project_598_updated ?? 0).toLocaleString(),
+        }),
+      });
+      setWorkforce600File(null);
+      window.dispatchEvent(new Event("dataset-changed"));
+    } catch (err) {
+      setWorkforce600Msg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
     } finally {
       setLoading(false);
     }
@@ -295,6 +330,38 @@ export default function UploadPage() {
           {workforceMsg && (
             <p className={cn("mt-3 text-sm", workforceMsg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
               {workforceMsg.text}
+            </p>
+          )}
+        </Section>
+
+        <Section title={t("workforce600Title")} description={t("workforce600Hint")}>
+          <div className="flex flex-wrap items-end gap-3">
+            <FilePick
+              label={t("workforce600Label")}
+              file={workforce600File}
+              required
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              onPick={setWorkforce600File}
+            />
+            <Button
+              variant="outline"
+              onClick={() => void uploadWorkforce600()}
+              disabled={loading || !workforce600File}
+            >
+              <Upload size={16} />
+              {t("submitWorkforce600")}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[#52525B]">
+            <Link href="/organisation" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+              {t("goOrganisation")}
+            </Link>
+          </p>
+          {workforce600Msg && (
+            <p className={cn("mt-3 text-sm", workforce600Msg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
+              {workforce600Msg.text}
             </p>
           )}
         </Section>

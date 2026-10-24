@@ -38,6 +38,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         if (!cancelled) setDataset({ loaded: false });
       }
     }
+    async function enrichProgressDate() {
+      try {
+        const full = await api.get<Dataset>("/dataset");
+        if (cancelled) return;
+        setDataset((prev) => ({
+          loaded: full.loaded ?? prev?.loaded ?? false,
+          cable_count: full.cable_count ?? prev?.cable_count,
+          progress_as_of: full.progress_as_of ?? null,
+        }));
+      } catch {
+        /* keep light status */
+      }
+    }
     (async () => {
       try {
         const [user, ds] = await Promise.all([
@@ -47,6 +60,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setMe(user);
         setDataset(ds);
+        // Light status has no progress date — fill it without blocking the shell.
+        if (ds.loaded && !ds.progress_as_of) void enrichProgressDate();
       } catch {
         if (!cancelled) router.replace("/login");
       } finally {
@@ -54,7 +69,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }
     })();
     const onChanged = () => {
-      void refreshDataset();
+      void refreshDataset().then(() => {
+        void enrichProgressDate();
+      });
     };
     window.addEventListener("dataset-changed", onChanged);
     return () => {

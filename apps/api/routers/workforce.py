@@ -45,18 +45,80 @@ class BoardBody(BaseModel):
 async def upload_workforce(
     file: UploadFile = File(...),
     year: int = 2026,
-    _: User = Depends(require_roles("planner", "admin")),
+    project: str | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("planner", "admin")),
 ):
-    path = settings.appdata_path / "uploads" / "workforce.xlsx"
+    """Upload headcount Excel.
+
+    Without ``project``: replaces the main (untagged) roster slice.
+    With ``project`` (e.g. ``600``): replaces that ship slice and defaults
+    those people to the given project on the organisation roster.
+    """
+    proj = (project or "").strip() or None
+    if proj and proj not in staffing_db.PROJECTS:
+        raise HTTPException(status_code=400, detail="Unknown project")
+
+    upload_name = f"workforce_{proj}.xlsx" if proj else "workforce.xlsx"
+    path = settings.appdata_path / "uploads" / upload_name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(await file.read())
     try:
-        frame = parse_workforce_excel(path, year=year)
+        incoming = parse_workforce_excel(path, year=year, project=proj)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    existing = board_svc.load_workforce_frame()
+    merged = board_svc.merge_workforce_upload(existing, incoming, project=proj)
     out = settings.appdata_path / "datasets" / _WF_PATH
-    frame.to_parquet(out, index=False)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_parquet(out, index=False)
     clear_workforce_cache()
-    return {"ok": True, "rows": len(frame), "people": int(frame["Name"].nunique()) if "Name" in frame.columns else 0}
+
+    project_updated = 0
+    project_598 = 0
+    if proj == "600" and "Name" in incoming.columns:
+        # Only October sheet names become project 600; everyone else defaults to 598.
+        try:
+            roster_names = (
+                merged["Name"].dropna().astype(str).tolist()
+                if merged is not None and not merged.empty and "Name" in merged.columns
+                else []
+            )
+            counts = staffing_db.apply_ship_600_project_defaults(
+                db,
+                incoming=incoming,
+                roster_names=roster_names,
+                user_email=user.email,
+            )
+            project_updated = int(counts.get("project_600", 0))
+            project_598 = int(counts.get("project_598", 0))
+        except staffing_db.StaffingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+    elif proj and "Name" in incoming.columns:
+        try:
+            project_updated = staffing_db.apply_default_project(
+                db,
+                incoming["Name"].dropna().astype(str).tolist(),
+                project=proj,
+                user_email=user.email,
+            )
+        except staffing_db.StaffingError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    people_in_upload = int(incoming["Name"].nunique()) if "Name" in incoming.columns else 0
+    october_people = (
+        len(staffing_db.names_on_sheet(incoming, "October")) if proj == "600" else 0
+    )
+    return {
+        "ok": True,
+        "rows": len(merged),
+        "upload_rows": len(incoming),
+        "people": people_in_upload if proj != "600" else october_people,
+        "project": proj,
+        "project_updated": project_updated,
+        "project_598_updated": project_598,
+    }
 
 
 @router.get("/series")
@@ -116,15 +178,31 @@ def workforce_people(
     people = staffing_db.load_people(db)
     if people is None:
         raise HTTPException(status_code=404, detail="No workforce data — upload the headcount Excel first")
+    off_roster = staffing_db.load_off_roster(db)
     as_of = next((p.get("as_of") for p in people if p.get("as_of")), None)
+    if as_of is None and off_roster:
+        as_of = next((p.get("as_of") for p in off_roster if p.get("as_of")), None)
     on_leave = sum(1 for p in people if p.get("on_leave"))
+    roster_month = None
+    next_month = None
+    if as_of:
+        try:
+            day = date.fromisoformat(str(as_of)[:10])
+            current, nxt = board_svc.roster_months(day)
+            roster_month = f"{current.year}-{current.month:02d}"
+            next_month = f"{nxt.year}-{nxt.month:02d}"
+        except ValueError:
+            pass
     return {
         "people": people,
+        "off_roster": off_roster,
         "positions": board_svc.unique_positions_from_people(people),
         "categories": list(CATEGORIES),
         "projects": sorted(staffing_db.PROJECTS),
         "count": len(people),
         "as_of": as_of,
+        "roster_month": roster_month,
+        "next_month": next_month,
         "on_leave_count": on_leave,
         "available_count": len(people) - on_leave,
     }
