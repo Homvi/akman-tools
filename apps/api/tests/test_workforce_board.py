@@ -34,7 +34,10 @@ def test_list_people_latest_position_and_lead_flag():
     assert by_name["Anna"]["available"] is True
     assert by_name["Anna"]["on_leave"] is False
     assert by_name["Béla"]["is_lead"] is False
-    assert "Cecil" not in by_name
+    # Leave-only (no prior Present) still appears on the organisation roster.
+    assert by_name["Cecil"]["on_leave"] is True
+    assert by_name["Cecil"]["available"] is False
+    assert by_name["Cecil"]["last_present"] is None
     assert by_name["Dani"]["on_leave"] is True
     assert by_name["Dani"]["leave_start"] == "2026-10-02"
     assert by_name["Dani"]["leave_end"] == "2026-10-03"
@@ -54,6 +57,26 @@ def test_list_people_hides_inactive_over_three_weeks():
     people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
     names = {p["name"] for p in people}
     assert names == {"Fresh"}
+
+
+def test_list_people_keeps_new_names_without_present_mark():
+    """Roster rows in the active window must show up even with no work cell yet."""
+    from datetime import date
+
+    df = pd.DataFrame(
+        [
+            {"Date": "2026-10-20", "Name": "OldHand", "Position": "Cable puller", "Present": True, "Status": "work"},
+            {"Date": "2026-10-22", "Name": "NewHire", "Position": "Electrician", "Present": False, "Status": ""},
+            {"Date": "2026-10-23", "Name": "OnLeave", "Position": "Cable puller", "Present": False, "Status": "leave"},
+            {"Date": "2026-09-01", "Name": "Gone", "Position": "Helper", "Present": False, "Status": ""},
+        ]
+    )
+    people = board_svc.list_people(df, as_of=date(2026, 10, 23), inactive_days=21)
+    by_name = {p["name"]: p for p in people}
+    assert set(by_name) == {"OldHand", "NewHire", "OnLeave"}
+    assert by_name["NewHire"]["last_present"] is None
+    assert by_name["NewHire"]["available"] is False
+    assert by_name["OnLeave"]["on_leave"] is True
 
 
 def test_list_people_merges_position_case_variants():

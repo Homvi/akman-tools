@@ -210,8 +210,9 @@ def list_people(
 ) -> list[dict[str, Any]]:
     """Unique people from workforce Excel (latest position wins).
 
-    Drops anyone whose last logged work day is older than ``inactive_days``
-    before the staffing day. Adds next leave window when Status is available.
+    Keeps anyone who either worked recently (``Present`` within ``inactive_days``)
+    or still appears on a roster row on/after the cutoff — so newly added names
+    without a work mark yet are not dropped. Older inactive people stay hidden.
     """
     frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
     if frame is None or frame.empty or "Name" not in frame.columns:
@@ -250,6 +251,7 @@ def list_people(
         .groupby(view.loc[present_mask, "Name"].str.casefold())["Date"]
         .max()
     )
+    last_seen = view.groupby(view["Name"].str.casefold())["Date"].max()
 
     present_names: set[str] = set()
     day_rows = view[view["Date"].dt.normalize().eq(day_ts)]
@@ -269,7 +271,16 @@ def list_people(
         seen.add(key)
 
         last = last_present.get(key)
-        if last is None or pd.isna(last) or pd.Timestamp(last) < cutoff:
+        seen_at = last_seen.get(key)
+        worked_recently = last is not None and not pd.isna(last) and pd.Timestamp(last) >= cutoff
+        # New roster lines (or leave-only) with no Present mark yet — still show them.
+        listed_recently = (
+            not worked_recently
+            and seen_at is not None
+            and not pd.isna(seen_at)
+            and pd.Timestamp(seen_at) >= cutoff
+        )
+        if not worked_recently and not listed_recently:
             continue
 
         position = str(row.get("Position") or "")
@@ -293,7 +304,11 @@ def list_people(
                 "is_lead": is_team_lead(position),
                 "available": available and not on_leave_now,
                 "on_leave": on_leave_now,
-                "last_present": pd.Timestamp(last).date().isoformat(),
+                "last_present": (
+                    pd.Timestamp(last).date().isoformat()
+                    if last is not None and not pd.isna(last)
+                    else None
+                ),
                 "leave_start": leave_start.isoformat() if leave_start else None,
                 "leave_end": leave_end.isoformat() if leave_end else None,
                 "leave_ranges": leave_ranges,
