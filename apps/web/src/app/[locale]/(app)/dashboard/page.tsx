@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { ChevronRight, Download, Search } from "lucide-react";
 import { api, qs } from "@/lib/api";
 import { displayText, isBlankDisplay, isRouteMissing } from "@/lib/display";
 import { Button } from "@/components/ui/button";
@@ -173,6 +173,7 @@ export default function DashboardPage() {
   const [searchError, setSearchError] = useState("");
   const [searching, setSearching] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [routeById, setRouteById] = useState<Record<string, CableRouteDetail | "loading" | "error">>({});
 
   const anschlussGroups = useMemo(() => {
@@ -291,7 +292,7 @@ export default function DashboardPage() {
               })}
             </p>
             {anschlussTotal > 0 && (
-              <div className="space-y-4 rounded-md border border-[#F87171]/40 bg-[#450A0A]/30 p-4">
+              <div className="space-y-2 rounded-md border border-[#F87171]/40 bg-[#450A0A]/30 p-4">
                 <p className="font-medium text-[#F87171]">
                   {t("anschlussTitle", { count: anschlussTotal })}
                 </p>
@@ -321,11 +322,25 @@ export default function DashboardPage() {
                 ).map((group) =>
                   group.rows.length === 0 ? null : (
                     <div key={group.key}>
-                      <h3 className="mb-2 text-sm font-medium text-[#FCA5A5]">
+                      <button
+                        type="button"
+                        aria-expanded={Boolean(openGroups[group.key])}
+                        onClick={() =>
+                          setOpenGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+                        }
+                        className="flex w-full items-center gap-1.5 rounded py-1 text-left text-sm font-medium text-[#FCA5A5] hover:text-[#FECACA]"
+                      >
+                        <ChevronRight
+                          className={cn(
+                            "h-4 w-4 shrink-0 transition-transform",
+                            openGroups[group.key] && "rotate-90"
+                          )}
+                        />
                         {group.title}{" "}
                         <span className="font-normal text-[#F87171]/80">({group.rows.length})</span>
-                      </h3>
-                      <div className="[&_td]:text-[#FCA5A5] [&_th]:text-[#F87171]">
+                      </button>
+                      {openGroups[group.key] && (
+                      <div className="mt-2 [&_td]:text-[#FCA5A5] [&_th]:text-[#F87171]">
                         <DataTable
                           rows={group.rows}
                           columns={ANSCHLUSS_COLS}
@@ -381,6 +396,7 @@ export default function DashboardPage() {
                           }}
                         />
                       </div>
+                      )}
                     </div>
                   )
                 )}
