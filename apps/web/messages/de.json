@@ -378,7 +378,9 @@
     "watching": "{count} Tasks",
     "projectLabel": "Projekt {code}",
     "backToTasks": "Zurück zu Tasks",
-    "taskNotFound": "Dieser Task wurde nicht gefunden."
+    "taskNotFound": "Dieser Task wurde nicht gefunden.",
+    "leadCounts": "Zur Kopfzahl zählen",
+    "leadCountsHelp": "Die Leitung erscheint bei den Arbeitern dieses Tasks. Nur auf einem Task gleichzeitig zählbar."
   },
   "categories": {
     "cable_puller": "Kabelzieher",

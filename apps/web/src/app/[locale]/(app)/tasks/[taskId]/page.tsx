@@ -66,6 +66,7 @@ export default function TaskDetailPage() {
     patchTask,
     removeTask,
     setTaskLead,
+    setLeadCounts,
     assignToTask,
     onDropPool,
     onDropTask,
@@ -474,6 +475,18 @@ export default function TaskDetailPage() {
                     onDragStart={setDraggingId}
                     onSelect={toggleSelectPerson}
                   />
+                  <label
+                    className="mt-1.5 flex cursor-pointer items-start gap-1.5 text-[11px] text-[#A1A1AA]"
+                    title={t("leadCountsHelp")}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-3.5 w-3.5 accent-[#F59E0B]"
+                      checked={Boolean(task.lead_counts)}
+                      onChange={(e) => setLeadCounts(task.id, e.target.checked)}
+                    />
+                    <span>{t("leadCounts")}</span>
+                  </label>
                 </div>
               ) : null}
             </div>

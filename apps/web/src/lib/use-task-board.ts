@@ -23,11 +23,15 @@ const NOTES_PATH = "/workforce/board/notes";
 type PeoplePayload = { people: Person[]; positions: string[] };
 
 function stripPersonFromTasks(tasks: Task[], personId: string): Task[] {
-  return tasks.map((task) => ({
-    ...task,
-    lead_id: task.lead_id === personId ? null : task.lead_id,
-    worker_ids: task.worker_ids.filter((id) => id !== personId),
-  }));
+  return tasks.map((task) => {
+    const leadGone = task.lead_id === personId;
+    return {
+      ...task,
+      lead_id: leadGone ? null : task.lead_id,
+      lead_counts: leadGone ? false : task.lead_counts,
+      worker_ids: task.worker_ids.filter((id) => id !== personId),
+    };
+  });
 }
 
 function normalizeBoard(boardRes: Board): Board {
@@ -50,9 +54,13 @@ function patchCachedPeople(updater: (people: Person[]) => Person[]): void {
   setApiCache(PEOPLE_PATH, { ...hit, people: updater(hit.people || []) });
 }
 
-/** Workers only — the group lead is not part of the task headcount. */
-export function taskHeadcount(task: Pick<Task, "worker_ids">) {
-  return task.worker_ids.length;
+/** Headcount: workers, plus lead when ``lead_counts`` (lead may be in worker_ids). */
+export function taskHeadcount(task: Pick<Task, "worker_ids" | "lead_id" | "lead_counts">) {
+  const n = task.worker_ids.length;
+  if (task.lead_counts && task.lead_id && !task.worker_ids.includes(task.lead_id)) {
+    return n + 1;
+  }
+  return n;
 }
 
 export function useTaskBoard(options?: {
@@ -198,15 +206,55 @@ export function useTaskBoard(options?: {
 
   const setTaskLead = useCallback(
     (taskId: string, leadId: string | null) => {
-      // Leads may supervise several tasks; only clear worker slot on *this* task.
+      // Leads may supervise several tasks; counting-as-worker resets until re-checked.
       commitBoard(
         board.tasks.map((task) => {
           if (task.id !== taskId) return task;
+          const prevLead = task.lead_id;
           return {
             ...task,
             lead_id: leadId,
-            worker_ids: leadId ? task.worker_ids.filter((id) => id !== leadId) : task.worker_ids,
+            lead_counts: false,
+            worker_ids: task.worker_ids.filter((id) => id !== leadId && id !== prevLead),
           };
+        })
+      );
+    },
+    [board.tasks, commitBoard]
+  );
+
+  /** Count lead in this team's headcount and list them among workers (exclusive per lead). */
+  const setLeadCounts = useCallback(
+    (taskId: string, counts: boolean) => {
+      const target = board.tasks.find((t) => t.id === taskId);
+      const leadId = target?.lead_id || null;
+      if (!leadId) return;
+      commitBoard(
+        board.tasks.map((task) => {
+          if (task.id === taskId) {
+            if (!counts) {
+              return {
+                ...task,
+                lead_counts: false,
+                worker_ids: task.worker_ids.filter((id) => id !== leadId),
+              };
+            }
+            return {
+              ...task,
+              lead_counts: true,
+              worker_ids: task.worker_ids.includes(leadId)
+                ? task.worker_ids
+                : [...task.worker_ids, leadId],
+            };
+          }
+          if (counts && task.lead_id === leadId && task.lead_counts) {
+            return {
+              ...task,
+              lead_counts: false,
+              worker_ids: task.worker_ids.filter((id) => id !== leadId),
+            };
+          }
+          return task;
         })
       );
     },
@@ -215,25 +263,32 @@ export function useTaskBoard(options?: {
 
   const assignToTask = useCallback(
     (personId: string, taskId: string, role: "lead" | "worker" | "auto") => {
+      const person = peopleById.get(personId);
       let resolved: "lead" | "worker" = role === "lead" || role === "worker" ? role : "worker";
       if (role === "auto") {
-        resolved = peopleById.get(personId)?.is_lead ? "lead" : "worker";
+        resolved = person?.is_lead ? "lead" : "worker";
       }
       if (resolved === "lead") {
         setTaskLead(taskId, personId);
         return;
       }
-      // Workers (and leads dropped onto a worker slot) may sit on multiple tasks.
+      // A worker may sit on only one task; leads may still supervise several via lead_id.
       commitBoard(
         board.tasks.map((task) => {
-          if (task.id !== taskId) return task;
-          if (task.lead_id === personId || task.worker_ids.includes(personId)) {
-            return task;
+          if (task.id === taskId) {
+            if (task.worker_ids.includes(personId)) {
+              return task;
+            }
+            return {
+              ...task,
+              worker_ids: [...task.worker_ids, personId],
+            };
           }
-          return {
-            ...task,
-            worker_ids: [...task.worker_ids, personId],
-          };
+          const nextWorkers = task.worker_ids.filter((id) => id !== personId);
+          if (task.lead_id === personId && task.lead_counts) {
+            return { ...task, lead_counts: false, worker_ids: nextWorkers };
+          }
+          return { ...task, worker_ids: nextWorkers };
         })
       );
     },
@@ -460,6 +515,7 @@ export function useTaskBoard(options?: {
     patchTask,
     removeTask,
     setTaskLead,
+    setLeadCounts,
     assignToTask,
     unassignPerson,
     addTask,

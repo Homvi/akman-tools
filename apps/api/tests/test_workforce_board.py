@@ -251,6 +251,36 @@ def test_normalize_task_dates_and_blocker_note(tmp_path, monkeypatch):
     assert second["end_date"] is None
 
 
+def test_normalize_board_worker_only_on_one_task(tmp_path, monkeypatch):
+    monkeypatch.setattr(board_svc, "board_path", lambda: tmp_path / "workforce_board.json")
+    saved = board_svc.save_board(
+        {
+            "tasks": [
+                {
+                    "id": "a",
+                    "title": "Foyer",
+                    "order": 0,
+                    "size": 2,
+                    "lead_id": "Viktor",
+                    "worker_ids": ["Reynaldo", "Botlo"],
+                },
+                {
+                    "id": "b",
+                    "title": "Lounge",
+                    "order": 1,
+                    "size": 4,
+                    "lead_id": "Paul",
+                    "worker_ids": ["Reynaldo", "Zviadi", "Attila"],
+                },
+            ]
+        }
+    )
+    by_id = {t["id"]: t for t in saved["tasks"]}
+    assert by_id["a"]["worker_ids"] == ["Reynaldo", "Botlo"]
+    assert by_id["b"]["worker_ids"] == ["Zviadi", "Attila"]
+    assert "Reynaldo" not in by_id["b"]["worker_ids"]
+
+
 def test_requirements_normalized_and_drive_size(tmp_path, monkeypatch):
     monkeypatch.setattr(board_svc, "board_path", lambda: tmp_path / "workforce_board.json")
     saved = board_svc.save_board(

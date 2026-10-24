@@ -59,6 +59,11 @@ export type Task = {
   size: number;
   requirements: Requirements;
   lead_id: string | null;
+  /**
+   * When true, the lead is also listed in ``worker_ids`` and counts toward headcount
+   * on this task only (a lead may supervise many tasks but count on one).
+   */
+  lead_counts: boolean;
   worker_ids: string[];
   blocker: boolean;
   blocker_note: string;
@@ -95,14 +100,24 @@ export function normalizeTask(task: Partial<Task> & { title: string }): Task {
   const requirements = normalizeRequirements(task.requirements);
   const fromReq = requirementsTotal(requirements);
   const rawSize = typeof task.size === "number" ? task.size : Number(task.size) || 0;
+  const leadId = task.lead_id || null;
+  const leadCounts = Boolean(task.lead_counts) && Boolean(leadId);
+  const rawWorkers = Array.isArray(task.worker_ids) ? task.worker_ids.filter(Boolean) : [];
+  // Lead may appear in worker_ids only when counted on this team.
+  const worker_ids = leadCounts
+    ? rawWorkers.includes(leadId!)
+      ? rawWorkers
+      : [...rawWorkers, leadId!]
+    : rawWorkers.filter((id) => id !== leadId);
   return {
     id: task.id || newId("task"),
     title: task.title,
     // Prefer explicit worker target; fall back to legacy requirements total.
     size: Math.max(0, Math.floor(rawSize > 0 ? rawSize : fromReq)),
     requirements,
-    lead_id: task.lead_id || null,
-    worker_ids: Array.isArray(task.worker_ids) ? task.worker_ids.filter(Boolean) : [],
+    lead_id: leadId,
+    lead_counts: leadCounts,
+    worker_ids,
     blocker: Boolean(task.blocker),
     blocker_note: typeof task.blocker_note === "string" ? task.blocker_note : "",
     done: Boolean(task.done),

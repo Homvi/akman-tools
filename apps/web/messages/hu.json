@@ -378,7 +378,9 @@
     "watching": "{count} task",
     "projectLabel": "Projekt {code}",
     "backToTasks": "Vissza a Taskshez",
-    "taskNotFound": "Ez a task nem található."
+    "taskNotFound": "Ez a task nem található.",
+    "leadCounts": "Belészámít a létszámba",
+    "leadCountsHelp": "A csoportvezető ezen a taskon a dolgozók között szerepel. Egyszerre csak egy taskon lehet beleszámolva."
   },
   "categories": {
     "cable_puller": "Kábelhúzó",

@@ -311,8 +311,14 @@ def build_task_board_pdf(
             }
         else:
             lead_person = None
-        # PDF team table lists lead + workers; headcount is workers only.
-        listed = ([lead_person] if lead_person else []) + members
+        # Team table: lead + workers. Headcount includes lead when lead_counts
+        # (lead is then also in worker_ids — avoid double-count).
+        lead_id = str(task.get("lead_id") or "")
+        lead_in_workers = bool(lead_id) and any(str(m.get("id") or m.get("name")) == lead_id for m in members)
+        listed = ([lead_person] if lead_person and not lead_in_workers else []) + members
+        headcount = len(members)
+        if task.get("lead_counts") and lead_person and not lead_in_workers:
+            headcount += 1
 
         block: list[Any] = []
         title_bar = Table(
@@ -335,7 +341,7 @@ def build_task_board_pdf(
         lead = lead_person
         info = [
             [p(lbl["period"], cell_bold), p(_fmt_range(start, end) or lbl["no_dates"])],
-            [p(lbl["headcount"], cell_bold), p(str(len(members)))],
+            [p(lbl["headcount"], cell_bold), p(str(headcount))],
             [p(lbl["lead"], cell_bold), p((lead or {}).get("name") or task.get("lead_id") or lbl["no_lead"])],
         ]
         info_table = Table(info, colWidths=[page_w * 0.2, page_w * 0.8])

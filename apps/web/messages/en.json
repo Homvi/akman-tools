@@ -378,7 +378,9 @@
     "watching": "{count} tasks",
     "projectLabel": "Project {code}",
     "backToTasks": "Back to Tasks",
-    "taskNotFound": "This task was not found."
+    "taskNotFound": "This task was not found.",
+    "leadCounts": "Count in headcount",
+    "leadCountsHelp": "The lead is listed among workers on this task. They can only be counted on one task at a time."
   },
   "categories": {
     "cable_puller": "Cable puller",

@@ -596,9 +596,11 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
 
         lead_raw = item.get("lead_id")
         lead_id = None if lead_raw in (None, "", "null") else str(lead_raw).strip()
+        # Lead may count toward headcount / appear among workers on at most one task.
+        lead_counts = bool(item.get("lead_counts")) and bool(lead_id)
 
-        # Same person may lead / work on multiple tasks. Within one task only:
-        # unique workers, and lead is not also listed as a worker.
+        # Same person may lead several tasks. Within one task: unique workers;
+        # lead is listed in worker_ids only when lead_counts is set.
         workers_src = item.get("worker_ids")
         if not isinstance(workers_src, list):
             # Back-compat: assignee_ids without lead
@@ -607,10 +609,14 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
         worker_ids: list[str] = []
         for aid in workers_src:
             pid = str(aid or "").strip()
-            if not pid or pid == lead_id or pid in seen_workers:
+            if not pid or pid in seen_workers:
+                continue
+            if pid == lead_id and not lead_counts:
                 continue
             seen_workers.add(pid)
             worker_ids.append(pid)
+        if lead_counts and lead_id and lead_id not in seen_workers:
+            worker_ids.append(lead_id)
 
         start_date, end_date = _parse_date_range(item)
         requirements = normalize_requirements(item.get("requirements"))
@@ -621,6 +627,7 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
                 "size": sum(requirements.values()) if requirements else _parse_size(item.get("size")),
                 "requirements": requirements,
                 "lead_id": lead_id,
+                "lead_counts": lead_counts,
                 "worker_ids": worker_ids,
                 "blocker": bool(item.get("blocker")),
                 "blocker_note": _parse_blocker_note(item.get("blocker_note")),
@@ -632,6 +639,34 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
         )
 
     tasks.sort(key=lambda t: (t["order"], t["title"].casefold()))
+
+    # A person may appear in worker_ids of at most one task (first by order wins).
+    seen_workers_global: set[str] = set()
+    for t in tasks:
+        kept: list[str] = []
+        for wid in t["worker_ids"]:
+            key = str(wid)
+            if key in seen_workers_global:
+                continue
+            seen_workers_global.add(key)
+            kept.append(wid)
+        t["worker_ids"] = kept
+        lid = t.get("lead_id")
+        if t.get("lead_counts") and lid and lid not in kept:
+            t["lead_counts"] = False
+
+    # A lead can only count on one task — keep the first by order.
+    counted_leads: set[str] = set()
+    for t in tasks:
+        lid = t.get("lead_id")
+        if not t.get("lead_counts") or not lid:
+            continue
+        if lid in counted_leads:
+            t["lead_counts"] = False
+            t["worker_ids"] = [w for w in t["worker_ids"] if w != lid]
+        else:
+            counted_leads.add(str(lid))
+
     return {
         "tasks": tasks,
         "updated_at": datetime.now(timezone.utc).isoformat(),
