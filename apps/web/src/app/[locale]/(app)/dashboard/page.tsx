@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable } from "@/components/data-table";
 import { TopProgress } from "@/components/progress-bar";
+import { LeaveMissingBox } from "@/components/leave-missing-box";
 import { cn } from "@/lib/utils";
 
 type AnschlussOpen = { kabelnr: string; sides: string[]; started?: boolean };
@@ -411,6 +412,7 @@ export default function DashboardPage() {
             </Link>
           </p>
         )}
+        <LeaveMissingBox />
       </section>
 
       <section className="mt-10">
