@@ -179,6 +179,22 @@ def anschluss_without_verlegt(df: pd.DataFrame | None) -> list[dict]:
     return out
 
 
+def dataset_status(db: Session, row: Dataset | None = None) -> dict:
+    """Lightweight gate payload — DB row only, no parquet read."""
+    row = row or current_dataset(db)
+    if not row:
+        return {"loaded": False, "cable_count": 0, "progress_as_of": None, "progress_as_of_iso": None}
+    return {
+        "loaded": True,
+        "status_name": row.status_name,
+        "catra_name": row.catra_name,
+        "cable_count": row.cable_count,
+        # Date requires parquet; AuthGate does not block on it.
+        "progress_as_of": None,
+        "progress_as_of_iso": None,
+    }
+
+
 def dataset_payload(db: Session, row: Dataset | None = None) -> dict:
     row = row or current_dataset(db)
     if not row:

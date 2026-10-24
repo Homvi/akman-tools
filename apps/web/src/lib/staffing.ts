@@ -6,18 +6,32 @@ export const CATEGORIES = [
   "long_distance_lead",
   "local_cabling_lead",
   "electrician_lead",
+  "engineer",
+  "warehouse_manager",
+  "iron_worker",
+  "iron_worker_lead",
+  "site_manager",
+  "administration",
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 export const LEAD_CATEGORIES: ReadonlySet<Category> = new Set([
   "long_distance_lead",
   "local_cabling_lead",
   "electrician_lead",
+  "iron_worker_lead",
 ]);
 export type Requirements = Partial<Record<Category, number>>;
 export const DEFAULT_REQUIREMENTS: Requirements = { long_distance_lead: 1, cable_puller: 2 };
 
 export function isCategory(value: unknown): value is Category {
   return typeof value === "string" && (CATEGORIES as readonly string[]).includes(value);
+}
+
+export const PROJECTS = ["598", "600", "602", "604"] as const;
+export type Project = (typeof PROJECTS)[number];
+
+export function isProject(value: unknown): value is Project {
+  return typeof value === "string" && (PROJECTS as readonly string[]).includes(value);
 }
 
 export type Person = {
@@ -27,6 +41,10 @@ export type Person = {
   is_lead: boolean;
   category?: Category | null;
   category_source?: "manual" | "auto" | null;
+  /** Afternoon shift — set manually, survives Excel re-upload. */
+  afternoon?: boolean;
+  /** Site project code — set manually. */
+  project?: Project | null;
   available?: boolean;
   on_leave?: boolean;
   leave_start?: string | null;
@@ -75,11 +93,13 @@ export function requirementsTotal(req: Requirements): number {
 
 export function normalizeTask(task: Partial<Task> & { title: string }): Task {
   const requirements = normalizeRequirements(task.requirements);
-  const total = requirementsTotal(requirements);
+  const fromReq = requirementsTotal(requirements);
+  const rawSize = typeof task.size === "number" ? task.size : Number(task.size) || 0;
   return {
     id: task.id || newId("task"),
     title: task.title,
-    size: total || (typeof task.size === "number" && task.size > 0 ? task.size : Number(task.size) || 0),
+    // Prefer explicit worker target; fall back to legacy requirements total.
+    size: Math.max(0, Math.floor(rawSize > 0 ? rawSize : fromReq)),
     requirements,
     lead_id: task.lead_id || null,
     worker_ids: Array.isArray(task.worker_ids) ? task.worker_ids.filter(Boolean) : [],
@@ -173,6 +193,34 @@ export function formatShortRange(range: LeaveRange): string {
   const start = range.start.slice(5).replace("-", ".");
   if (!range.end || range.end === range.start) return start;
   return `${start}–${range.end.slice(5).replace("-", ".")}`;
+}
+
+/** Unique workers across every task this person leads (excludes the lead). */
+export function supervisedCount(personId: string, tasks: Task[]): number {
+  const ids = new Set<string>();
+  for (const task of tasks) {
+    if (task.lead_id !== personId) continue;
+    for (const wid of task.worker_ids) {
+      if (wid && wid !== personId) ids.add(wid);
+    }
+  }
+  return ids.size;
+}
+
+export function supervisedCounts(tasks: Task[]): Map<string, number> {
+  const byLead = new Map<string, Set<string>>();
+  for (const task of tasks) {
+    if (!task.lead_id) continue;
+    let ids = byLead.get(task.lead_id);
+    if (!ids) {
+      ids = new Set();
+      byLead.set(task.lead_id, ids);
+    }
+    for (const wid of task.worker_ids) {
+      if (wid && wid !== task.lead_id) ids.add(wid);
+    }
+  }
+  return new Map([...byLead].map(([id, ids]) => [id, ids.size]));
 }
 
 export function taskMembers(task: Task, peopleById: Map<string, Person>): Person[] {

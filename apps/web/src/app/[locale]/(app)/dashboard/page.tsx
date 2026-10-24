@@ -14,6 +14,22 @@ import { LeaveMissingBox } from "@/components/leave-missing-box";
 import { cn } from "@/lib/utils";
 
 type AnschlussOpen = { kabelnr: string; sides: string[]; started?: boolean };
+type CardLang = "en" | "hu" | "de";
+type ExportColumn = { key: string; label: string };
+
+const DEFAULT_EXPORT_KEYS = [
+  "kabelnr",
+  "liste",
+  "category",
+  "length_m",
+  "pull_status",
+  "stop_locations",
+  "geraet_a",
+  "geraet_e",
+  "ort_a",
+  "ort_e",
+  "verlegt",
+];
 
 type CableRouteDetail = {
   kabelnr: string;
@@ -165,6 +181,7 @@ function CableCard({ cable }: { cable: CableDetail }) {
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tc = useTranslations("common");
+  const ts = useTranslations("stutzen");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -176,6 +193,13 @@ export default function DashboardPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [routeById, setRouteById] = useState<Record<string, CableRouteDetail | "loading" | "error">>({});
+  const [exportColumns, setExportColumns] = useState<ExportColumn[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(DEFAULT_EXPORT_KEYS);
+  const [showExportCols, setShowExportCols] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const [cardLang, setCardLang] = useState<CardLang>("en");
+  const [filterNote, setFilterNote] = useState("");
 
   const anschlussGroups = useMemo(() => {
     const notStarted: Record<string, unknown>[] = [];
@@ -215,10 +239,68 @@ export default function DashboardPage() {
         if (!cancelled) setLoading(false);
       }
     })();
+    api
+      .get<{ columns: ExportColumn[]; defaults: string[] }>("/export/lookup/columns")
+      .then((data) => {
+        if (cancelled) return;
+        setExportColumns(data.columns || []);
+        if (data.defaults?.length) setSelectedColumns(data.defaults);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExportColumns(DEFAULT_EXPORT_KEYS.map((key) => ({ key, label: key })));
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  function toggleColumn(key: string) {
+    setSelectedColumns((prev) => {
+      if (prev.includes(key)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((k) => k !== key);
+      }
+      return [...prev, key];
+    });
+  }
+
+  async function exportExcel() {
+    const ids = lastIds || query.trim();
+    if (!ids || !cables.length || selectedColumns.length === 0) return;
+    setExporting(true);
+    setSearchError("");
+    try {
+      await api.downloadPost("/export/lookup", { ids, columns: selectedColumns }, "kabel_lookup.xlsx");
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : tc("exportFailed"));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function exportPullCards() {
+    const ids = lastIds || query.trim();
+    if (!ids || !cables.length) return;
+    setPdfExporting(true);
+    setSearchError("");
+    try {
+      await api.downloadPost(
+        "/export/lookup/pull-cards",
+        {
+          ids,
+          lang: cardLang,
+          filter_note: filterNote.trim() || ids,
+        },
+        "lookup_pull_cards.pdf"
+      );
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : tc("exportFailed"));
+    } finally {
+      setPdfExporting(false);
+    }
+  }
 
   async function toggleAnschlussRow(row: Record<string, unknown>) {
     const id = String(row.Kabelnr ?? "").trim();
@@ -274,7 +356,7 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <TopProgress show={loading || searching} />
+      <TopProgress show={loading || searching || exporting || pdfExporting} />
       <h1 className="text-2xl font-semibold tracking-tight text-[#FAFAFA]">{t("title")}</h1>
 
       <section className="mt-6 space-y-3 text-[15px] leading-relaxed text-[#A1A1AA]">
@@ -432,18 +514,87 @@ export default function DashboardPage() {
           <Button
             type="button"
             variant="outline"
-            disabled={!cables.length}
-            onClick={() =>
-              api.download(`/export/lookup${qs({ ids: lastIds || query })}`, "kabel_lookup.xlsx")
-            }
+            disabled={!cables.length || exporting || selectedColumns.length === 0}
+            onClick={() => void exportExcel()}
           >
             <Download size={16} />
             {tc("excel")}
           </Button>
+          <Button type="button" variant="ghost" onClick={() => setShowExportCols((v) => !v)}>
+            {showExportCols ? tc("hideCols") : tc("exportCols")}
+          </Button>
         </form>
-        <p className="mt-2 text-xs text-[#52525B]">
-          {t("searchHint")}
-        </p>
+        <p className="mt-2 text-xs text-[#52525B]">{t("searchHint")}</p>
+
+        <div className="mt-4 rounded-md border border-[#27272A] bg-[#0C0C0E] p-3">
+          <div className="mb-2 flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm text-[#A1A1AA]">
+              {ts("pullCardsLang")}
+              <select
+                className="h-9 rounded-md border border-[#27272A] bg-[#09090B] px-2 text-sm text-[#FAFAFA]"
+                value={cardLang}
+                onChange={(e) => setCardLang(e.target.value as CardLang)}
+              >
+                <option value="en">EN</option>
+                <option value="hu">HU</option>
+                <option value="de">DE</option>
+              </select>
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!cables.length || pdfExporting}
+              onClick={() => void exportPullCards()}
+            >
+              <Download size={16} />
+              {ts("pullCards")}
+            </Button>
+          </div>
+          <label className="block text-xs uppercase tracking-wide text-[#71717A]">
+            {t("filterNote")}
+            <textarea
+              className="mt-1 h-16 w-full rounded-md border border-[#27272A] bg-[#09090B] p-2 font-mono-data text-sm text-[#FAFAFA] placeholder:text-[#52525B]"
+              value={filterNote}
+              onChange={(e) => setFilterNote(e.target.value)}
+              placeholder={t("filterNotePlaceholder")}
+            />
+          </label>
+          <p className="mt-1 text-xs text-[#71717A]">{t("filterNoteHelp")}</p>
+        </div>
+
+        {showExportCols && (
+          <div className="mt-4 rounded-md border border-[#27272A] bg-[#0C0C0E] p-3">
+            <p className="mb-2 text-xs uppercase tracking-wide text-[#71717A]">{tc("exportColsHelp")}</p>
+            <div className="flex flex-wrap gap-2">
+              {(exportColumns.length
+                ? exportColumns
+                : DEFAULT_EXPORT_KEYS.map((key) => ({ key, label: key }))
+              ).map((col) => {
+                const checked = selectedColumns.includes(col.key);
+                return (
+                  <label
+                    key={col.key}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs",
+                      checked
+                        ? "border-[#2DD4BF]/40 bg-[#042F2E]/30 text-[#FAFAFA]"
+                        : "border-[#27272A] text-[#A1A1AA]"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="accent-[#2DD4BF]"
+                      checked={checked}
+                      onChange={() => toggleColumn(col.key)}
+                    />
+                    {col.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {searchError && <p className="mt-3 text-sm text-[#F87171]">{searchError}</p>}
         {missing.length > 0 && cables.length > 0 && (
           <p className="mt-3 text-sm text-[#F97316]">{t("missing", { ids: missing.join("; ") })}</p>

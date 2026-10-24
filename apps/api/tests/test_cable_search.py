@@ -1,6 +1,13 @@
 import pandas as pd
 
-from apps.api.services.cable_lookup import find_cable, find_cables, parse_cable_ids, search_cable_ids
+from apps.api.services.cable_lookup import (
+    find_cable,
+    find_cable_rows,
+    find_cables,
+    parse_cable_ids,
+    search_cable_ids,
+)
+from src.stutzen_filter import DEFAULT_EXPORT_COLUMNS, select_export_columns
 
 
 def test_search_cable_ids_typeahead():
@@ -55,3 +62,27 @@ def test_find_cable_matches_comma_and_dot_forms():
     assert len(found) == 1
     assert found[0]["kabelnr"] == "2114,1"
     assert missing == ["9999"]
+
+
+def test_find_cable_rows_preserves_order_for_export():
+    df = pd.DataFrame(
+        {
+            "Kabelnr": ["0006", "2114,1"],
+            "Liste": ["A", "B"],
+            "Category": ["HV", "LV"],
+            "Length_m": [20.0, 10.0],
+            "Geraet_A": ["GA", "GB"],
+            "Geraet_E": ["EA", "EB"],
+            "Ort_A": ["OA", "OB"],
+            "Ort_E": ["OE", "OF"],
+            "verlegt": [None, None],
+            "Pfad": ["A (E 1,0) B", "A (E 1,0) B"],
+            "Pull_status": ["Not pulled", "Not pulled"],
+        }
+    )
+    rows, missing = find_cable_rows(df, ["2114,1", "0006", "missing"])
+    assert missing == ["missing"]
+    assert list(rows["Kabelnr"].astype(str)) == ["2114,1", "0006"]
+    slim = select_export_columns(rows, list(DEFAULT_EXPORT_COLUMNS))
+    assert "Kabelnr" in slim.columns
+    assert len(slim) == 2

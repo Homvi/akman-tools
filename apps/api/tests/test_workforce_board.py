@@ -301,3 +301,38 @@ def test_list_people_leave_ranges_bridge_weekends():
         {"start": "2026-10-30", "end": "2026-11-03"},
         {"start": "2026-11-16", "end": "2026-11-16"},
     ]
+
+
+def test_load_workforce_frame_and_list_people_mtime_cache(tmp_path, monkeypatch):
+    from datetime import date
+
+    parquet = tmp_path / "workforce.parquet"
+    df = pd.DataFrame(
+        [
+            {
+                "Date": "2026-10-20",
+                "Name": "Anna",
+                "Position": "Cable puller",
+                "Present": True,
+                "Status": "work",
+            }
+        ]
+    )
+    df.to_parquet(parquet, index=False)
+    monkeypatch.setattr(board_svc, "workforce_parquet_path", lambda: parquet)
+    board_svc.clear_workforce_cache()
+
+    first = board_svc.load_workforce_frame()
+    assert first is not None
+    second = board_svc.load_workforce_frame()
+    assert second is first  # same cached object
+
+    people_a = board_svc.list_people(as_of=date(2026, 10, 23))
+    people_b = board_svc.list_people(as_of=date(2026, 10, 23))
+    assert people_a == people_b
+    assert people_a[0]["name"] == "Anna"
+
+    board_svc.clear_workforce_cache()
+    third = board_svc.load_workforce_frame()
+    assert third is not None
+    assert third is not first

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Link } from "@/i18n/routing";
 import { api, qs } from "@/lib/api";
+import { invalidateApiCache } from "@/lib/api-cache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TopProgress } from "@/components/progress-bar";
@@ -314,6 +315,9 @@ export default function WorkerPage() {
   function saveProfile(
     patch: Partial<{ phone: string; address: string; languages: string[]; inactive: boolean }>
   ) {
+    if ("inactive" in patch) {
+      invalidateApiCache("/workforce/people");
+    }
     return run(() => api.put<WorkerDetail>(`/workers/profile${q}`, patch));
   }
 
@@ -321,6 +325,7 @@ export default function WorkerPage() {
     setBusy(true);
     setError("");
     try {
+      invalidateApiCache("/workforce/people");
       const res = await api.put<Pick<Person, "category" | "category_source">>("/workforce/people/category", {
         name,
         category,

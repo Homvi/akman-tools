@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
 import { api } from "@/lib/api";
 import { AppShell } from "@/components/app-shell";
+import { ToastProvider } from "@/components/toast";
 
 export type Me = { email: string; roles: string[] };
 
@@ -31,7 +32,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     async function refreshDataset() {
       try {
-        const ds = await api.get<Dataset>("/dataset");
+        const ds = await api.get<Dataset>("/dataset/status");
         if (!cancelled) setDataset(ds);
       } catch {
         if (!cancelled) setDataset({ loaded: false });
@@ -39,10 +40,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
     (async () => {
       try {
-        const user = await api.get<Me>("/auth/me");
+        const [user, ds] = await Promise.all([
+          api.get<Me>("/auth/me"),
+          api.get<Dataset>("/dataset/status").catch(() => ({ loaded: false } as Dataset)),
+        ]);
         if (cancelled) return;
         setMe(user);
-        await refreshDataset();
+        setDataset(ds);
       } catch {
         if (!cancelled) router.replace("/login");
       } finally {
@@ -79,13 +83,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <MeContext.Provider value={me}>
-      <AppShell
-        loading={busy}
-        onLogout={logout}
-        status={{ loaded: !!dataset?.loaded, progressAsOf: dataset?.progress_as_of }}
-      >
-        {children}
-      </AppShell>
+      <ToastProvider>
+        <AppShell
+          loading={busy}
+          onLogout={logout}
+          status={{ loaded: !!dataset?.loaded, progressAsOf: dataset?.progress_as_of }}
+        >
+          {children}
+        </AppShell>
+      </ToastProvider>
     </MeContext.Provider>
   );
 }

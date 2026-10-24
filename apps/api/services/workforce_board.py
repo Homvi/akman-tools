@@ -22,6 +22,10 @@ _LEAD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Process-local caches (mtime/size keyed). Cleared on Excel upload / meta writes.
+_FRAME_CACHE: dict[str, Any] = {"sig": None, "frame": None}
+_PEOPLE_CACHE: dict[str, Any] = {"sig": None, "as_of": None, "inactive_days": None, "people": None}
+
 
 def workforce_parquet_path() -> Path:
     return settings.appdata_path / "datasets" / _WF_PATH
@@ -29,6 +33,23 @@ def workforce_parquet_path() -> Path:
 
 def board_path() -> Path:
     return settings.appdata_path / "datasets" / _BOARD_PATH
+
+
+def clear_workforce_cache() -> None:
+    _FRAME_CACHE["sig"] = None
+    _FRAME_CACHE["frame"] = None
+    _PEOPLE_CACHE["sig"] = None
+    _PEOPLE_CACHE["as_of"] = None
+    _PEOPLE_CACHE["inactive_days"] = None
+    _PEOPLE_CACHE["people"] = None
+
+
+def _parquet_signature() -> str | None:
+    path = workforce_parquet_path()
+    if not path.exists():
+        return None
+    st = path.stat()
+    return f"{st.st_mtime_ns}:{st.st_size}"
 
 
 def is_team_lead(position: str) -> bool:
@@ -43,10 +64,19 @@ def _empty_board() -> dict[str, Any]:
 
 
 def load_workforce_frame() -> pd.DataFrame | None:
-    path = workforce_parquet_path()
-    if not path.exists():
+    sig = _parquet_signature()
+    if sig is None:
+        clear_workforce_cache()
         return None
-    return pd.read_parquet(path)
+    if _FRAME_CACHE["sig"] == sig and _FRAME_CACHE["frame"] is not None:
+        return _FRAME_CACHE["frame"]
+    frame = pd.read_parquet(workforce_parquet_path())
+    _FRAME_CACHE["sig"] = sig
+    _FRAME_CACHE["frame"] = frame
+    # People list depends on the frame; drop stale people cache.
+    _PEOPLE_CACHE["sig"] = None
+    _PEOPLE_CACHE["people"] = None
+    return frame
 
 
 def ensure_workforce_status(frame: pd.DataFrame | None = None) -> pd.DataFrame | None:
@@ -70,6 +100,9 @@ def ensure_workforce_status(frame: pd.DataFrame | None = None) -> pd.DataFrame |
         out = workforce_parquet_path()
         out.parent.mkdir(parents=True, exist_ok=True)
         refreshed.to_parquet(out, index=False)
+        clear_workforce_cache()
+        _FRAME_CACHE["sig"] = _parquet_signature()
+        _FRAME_CACHE["frame"] = refreshed
         return refreshed
     except Exception:
         return current
@@ -292,6 +325,18 @@ def list_people(
     either worked recently (``Present`` within ``inactive_days``) or still appears
     on a roster row on/after the cutoff.
     """
+    use_cache = df is None
+    sig = _parquet_signature() if use_cache else None
+    if (
+        use_cache
+        and sig
+        and _PEOPLE_CACHE["sig"] == sig
+        and _PEOPLE_CACHE["as_of"] == (as_of.isoformat() if as_of else None)
+        and _PEOPLE_CACHE["inactive_days"] == int(inactive_days)
+        and _PEOPLE_CACHE["people"] is not None
+    ):
+        return list(_PEOPLE_CACHE["people"])
+
     frame = ensure_workforce_status(df if df is not None else load_workforce_frame())
     view = _prepare_people_view(frame) if frame is not None else None
     if view is None:
@@ -378,6 +423,11 @@ def list_people(
             p["name"].casefold(),
         )
     )
+    if use_cache and sig:
+        _PEOPLE_CACHE["sig"] = sig
+        _PEOPLE_CACHE["as_of"] = as_of.isoformat() if as_of else None
+        _PEOPLE_CACHE["inactive_days"] = int(inactive_days)
+        _PEOPLE_CACHE["people"] = people
     return people
 
 

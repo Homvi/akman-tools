@@ -16,9 +16,11 @@ const NAV_KEYS = [
   { href: "/stopped", key: "stopped" as const },
   { href: "/near-complete", key: "nearComplete" as const },
   { href: "/stutzen", key: "stutzen" as const },
+  { href: "/filter", key: "filter" as const },
   { href: "/areas", key: "areas" as const },
   { href: "/workforce", key: "workforce" as const },
-  { href: "/teams", key: "teams" as const },
+  { href: "/organisation", key: "organisation" as const },
+  { href: "/tasks", key: "tasks" as const },
   { href: "/calendar", key: "calendar" as const },
   { href: "/routes", key: "routes" as const },
   { href: "/progress", key: "progress" as const },
@@ -53,7 +55,7 @@ export function AppShell({
           onClick={() => setOpen(false)}
           className={cn(
             "rounded-md px-3 py-2 text-sm transition-colors",
-            pathname === item.href
+            pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`))
               ? "bg-[#2DD4BF] font-medium text-[#042F2E]"
               : item.href === "/upload"
                 ? "text-[#52525B] hover:bg-[#18181B] hover:text-[#A1A1AA]"

@@ -20,6 +20,15 @@ def get_dataset(
     return ds.dataset_payload(db)
 
 
+@router.get("/status")
+def get_dataset_status(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("planner", "admin", "worker")),
+):
+    """Fast AuthGate check — no parquet / progress date computation."""
+    return ds.dataset_status(db)
+
+
 @router.get("/summary")
 def get_summary(
     db: Session = Depends(get_db),

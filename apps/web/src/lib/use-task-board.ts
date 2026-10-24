@@ -2,6 +2,8 @@
 
 import { DragEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { cachedGet, invalidateApiCache, peekApiCache, setApiCache } from "@/lib/api-cache";
+import { useToast } from "@/components/toast";
 import type { TaskNote } from "@/components/teams/task-notes";
 import {
   LEAD_CATEGORIES,
@@ -14,12 +16,38 @@ import {
   type Task,
 } from "@/lib/staffing";
 
+const PEOPLE_PATH = "/workforce/people";
+const BOARD_PATH = "/workforce/board";
+const NOTES_PATH = "/workforce/board/notes";
+
+type PeoplePayload = { people: Person[]; positions: string[] };
+
 function stripPersonFromTasks(tasks: Task[], personId: string): Task[] {
   return tasks.map((task) => ({
     ...task,
     lead_id: task.lead_id === personId ? null : task.lead_id,
     worker_ids: task.worker_ids.filter((id) => id !== personId),
   }));
+}
+
+function normalizeBoard(boardRes: Board): Board {
+  return {
+    tasks: (boardRes.tasks || []).map((task) => {
+      const normalized = normalizeTask({ ...task, requirements: {} });
+      return {
+        ...normalized,
+        requirements: {},
+        size: typeof task.size === "number" && task.size > 0 ? task.size : normalized.size,
+      };
+    }),
+    updated_at: boardRes.updated_at,
+  };
+}
+
+function patchCachedPeople(updater: (people: Person[]) => Person[]): void {
+  const hit = peekApiCache<PeoplePayload>(PEOPLE_PATH);
+  if (!hit) return;
+  setApiCache(PEOPLE_PATH, { ...hit, people: updater(hit.people || []) });
 }
 
 /** Workers only — the group lead is not part of the task headcount. */
@@ -31,16 +59,28 @@ export function useTaskBoard(options?: {
   locale?: string;
   fallbackError?: string;
   autoLoad?: boolean;
+  /** When false, skip GET /workforce/board/notes (Organisation does not need them). */
+  loadNotes?: boolean;
+  /** Toast message when optimistic category/roster save fails. */
+  saveFailedMessage?: string;
 }) {
   const fallbackError = options?.fallbackError || "Failed to load";
+  const saveFailedMessage = options?.saveFailedMessage || fallbackError;
   const locale = options?.locale || "hu";
   const autoLoad = options?.autoLoad !== false;
+  const loadNotes = options?.loadNotes !== false;
+  const toast = useToast();
 
-  const [people, setPeople] = useState<Person[]>([]);
-  const [positions, setPositions] = useState<string[]>([]);
-  const [board, setBoard] = useState<Board>({ tasks: [] });
+  const [people, setPeople] = useState<Person[]>(() => peekApiCache<PeoplePayload>(PEOPLE_PATH)?.people || []);
+  const [positions, setPositions] = useState<string[]>(
+    () => peekApiCache<PeoplePayload>(PEOPLE_PATH)?.positions || []
+  );
+  const [board, setBoard] = useState<Board>(() => {
+    const hit = peekApiCache<Board>(BOARD_PATH);
+    return hit ? normalizeBoard(hit) : { tasks: [] };
+  });
   const [notes, setNotes] = useState<Record<string, TaskNote[]>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !peekApiCache(PEOPLE_PATH) && !peekApiCache(BOARD_PATH));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [needUpload, setNeedUpload] = useState(false);
@@ -49,43 +89,38 @@ export function useTaskBoard(options?: {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const warm = Boolean(peekApiCache(PEOPLE_PATH) || peekApiCache(BOARD_PATH));
+    if (!warm) setLoading(true);
     setError("");
     setNeedUpload(false);
     try {
-      const [peopleRes, boardRes, notesRes] = await Promise.all([
-        api.get<{ people: Person[]; positions: string[] }>("/workforce/people"),
-        api.get<Board>("/workforce/board"),
-        api.get<Record<string, TaskNote[]>>("/workforce/board/notes").catch(() => ({})),
-      ]);
+      const peopleReq = cachedGet(PEOPLE_PATH, () => api.get<PeoplePayload>(PEOPLE_PATH));
+      const boardReq = cachedGet(BOARD_PATH, () => api.get<Board>(BOARD_PATH));
+      const notesReq = loadNotes
+        ? cachedGet(NOTES_PATH, () =>
+            api.get<Record<string, TaskNote[]>>(NOTES_PATH).catch(() => ({} as Record<string, TaskNote[]>))
+          )
+        : Promise.resolve({} as Record<string, TaskNote[]>);
+      const [peopleRes, boardRes, notesRes] = await Promise.all([peopleReq, boardReq, notesReq]);
       setNotes(notesRes || {});
       setPeople(peopleRes.people || []);
       setPositions(peopleRes.positions || []);
-      setBoard({
-        tasks: (boardRes.tasks || []).map((task) => {
-          const normalized = normalizeTask({ ...task, requirements: {} });
-          // Keep worker target (`size`); drop category requirements.
-          return {
-            ...normalized,
-            requirements: {},
-            size: typeof task.size === "number" && task.size > 0 ? task.size : normalized.size,
-          };
-        }),
-        updated_at: boardRes.updated_at,
-      });
+      setBoard(normalizeBoard(boardRes));
     } catch (err) {
       const msg = err instanceof Error ? err.message : fallbackError;
       if (/workforce|upload|404/i.test(msg) || msg.toLowerCase().includes("no workforce")) {
         setNeedUpload(true);
         setPeople([]);
         setPositions([]);
+        invalidateApiCache(PEOPLE_PATH);
+        invalidateApiCache(BOARD_PATH);
       } else {
         setError(msg);
       }
     } finally {
       setLoading(false);
     }
-  }, [fallbackError]);
+  }, [fallbackError, loadNotes]);
 
   useEffect(() => {
     if (autoLoad) void load();
@@ -94,6 +129,9 @@ export function useTaskBoard(options?: {
   useEffect(() => {
     if (!autoLoad || typeof window === "undefined") return;
     const onChanged = () => {
+      invalidateApiCache(PEOPLE_PATH);
+      invalidateApiCache(BOARD_PATH);
+      invalidateApiCache(NOTES_PATH);
       void load();
     };
     window.addEventListener("dataset-changed", onChanged);
@@ -105,27 +143,20 @@ export function useTaskBoard(options?: {
       setSaving(true);
       setError("");
       try {
-      const payload = {
-        tasks: next.tasks.map((task) => ({
-          ...task,
-          requirements: {},
-          size: Math.max(0, Math.floor(Number(task.size) || 0)),
-        })),
-      };
-      const saved = await api.put<Board>("/workforce/board", payload);
-      setBoard({
-        tasks: (saved.tasks || []).map((task) => {
-          const normalized = normalizeTask({ ...task, requirements: {} });
-          return {
-            ...normalized,
+        const payload = {
+          tasks: next.tasks.map((task) => ({
+            ...task,
             requirements: {},
-            size: typeof task.size === "number" && task.size > 0 ? task.size : normalized.size,
-          };
-        }),
-        updated_at: saved.updated_at,
-      });
+            size: Math.max(0, Math.floor(Number(task.size) || 0)),
+          })),
+        };
+        const saved = await api.put<Board>(BOARD_PATH, payload);
+        const normalized = normalizeBoard(saved);
+        setBoard(normalized);
+        setApiCache(BOARD_PATH, saved);
       } catch (err) {
         setError(err instanceof Error ? err.message : fallbackError);
+        invalidateApiCache(BOARD_PATH);
       } finally {
         setSaving(false);
       }
@@ -287,57 +318,83 @@ export function useTaskBoard(options?: {
 
   const setCategory = useCallback(
     async (person: Person, category: Category | null) => {
-      setSaving(true);
-      setError("");
+      const prev = people.find((p) => p.id === person.id);
+      if (!prev) return;
+      const optimistic: Person = {
+        ...prev,
+        category,
+        category_source: category ? "manual" : prev.category_source,
+        is_lead: category ? LEAD_CATEGORIES.has(category) : prev.is_lead,
+      };
+      setPeople((list) => list.map((p) => (p.id === person.id ? optimistic : p)));
+      patchCachedPeople((list) => list.map((p) => (p.id === person.id ? optimistic : p)));
       try {
         const res = await api.put<Pick<Person, "category" | "category_source">>("/workforce/people/category", {
           name: person.name,
           category,
         });
-        setPeople((prev) =>
-          prev.map((p) =>
+        setPeople((list) =>
+          list.map((p) =>
             p.id === person.id
-              ? { ...p, ...res, is_lead: res.category ? LEAD_CATEGORIES.has(res.category) : p.is_lead }
+              ? {
+                  ...p,
+                  ...res,
+                  is_lead: res.category ? LEAD_CATEGORIES.has(res.category) : p.is_lead,
+                }
               : p
           )
         );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : fallbackError);
-      } finally {
-        setSaving(false);
+        patchCachedPeople((list) =>
+          list.map((p) =>
+            p.id === person.id
+              ? {
+                  ...p,
+                  ...res,
+                  is_lead: res.category ? LEAD_CATEGORIES.has(res.category) : p.is_lead,
+                }
+              : p
+          )
+        );
+      } catch {
+        setPeople((list) => list.map((p) => (p.id === person.id ? prev : p)));
+        patchCachedPeople((list) => list.map((p) => (p.id === person.id ? prev : p)));
+        toast.error(saveFailedMessage);
       }
     },
-    [fallbackError]
+    [people, saveFailedMessage, toast]
   );
 
   const setRoster = useCallback(
     async (person: Person, patch: { afternoon: boolean; project: Project | null }) => {
-      setSaving(true);
-      setError("");
+      const prev = people.find((p) => p.id === person.id);
+      if (!prev) return;
+      const optimistic: Person = {
+        ...prev,
+        afternoon: patch.afternoon,
+        project: patch.project,
+      };
+      setPeople((list) => list.map((p) => (p.id === person.id ? optimistic : p)));
+      patchCachedPeople((list) => list.map((p) => (p.id === person.id ? optimistic : p)));
       try {
         const res = await api.put<{ afternoon: boolean; project: string | null }>("/workforce/people/roster", {
           name: person.name,
           afternoon: patch.afternoon,
           project: patch.project,
         });
-        setPeople((prev) =>
-          prev.map((p) =>
-            p.id === person.id
-              ? {
-                  ...p,
-                  afternoon: Boolean(res.afternoon),
-                  project: (res.project as Project | null) || null,
-                }
-              : p
-          )
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : fallbackError);
-      } finally {
-        setSaving(false);
+        const next: Person = {
+          ...optimistic,
+          afternoon: Boolean(res.afternoon),
+          project: (res.project as Project | null) || null,
+        };
+        setPeople((list) => list.map((p) => (p.id === person.id ? next : p)));
+        patchCachedPeople((list) => list.map((p) => (p.id === person.id ? next : p)));
+      } catch {
+        setPeople((list) => list.map((p) => (p.id === person.id ? prev : p)));
+        patchCachedPeople((list) => list.map((p) => (p.id === person.id ? prev : p)));
+        toast.error(saveFailedMessage);
       }
     },
-    [fallbackError]
+    [people, saveFailedMessage, toast]
   );
 
   const addNote = useCallback(
@@ -347,6 +404,7 @@ export function useTaskBoard(options?: {
           text,
         });
         setNotes((prev) => ({ ...prev, [taskId]: [note, ...(prev[taskId] || [])] }));
+        invalidateApiCache(NOTES_PATH);
       } catch (err) {
         setError(err instanceof Error ? err.message : fallbackError);
         throw err;
@@ -363,6 +421,7 @@ export function useTaskBoard(options?: {
           ...prev,
           [note.task_id]: (prev[note.task_id] || []).filter((n) => n.id !== note.id),
         }));
+        invalidateApiCache(NOTES_PATH);
       } catch (err) {
         setError(err instanceof Error ? err.message : fallbackError);
       }

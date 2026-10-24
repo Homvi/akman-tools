@@ -14,6 +14,7 @@ from apps.api.models import User
 from apps.api.services import dataset as ds
 from apps.api.services import staffing_db
 from apps.api.services import workforce_board as board_svc
+from apps.api.services.workforce_board import clear_workforce_cache
 from apps.api.services.jsonutil import records
 from apps.api.services.workers import person_key
 from src.progress import build_pull_events, daily_progress
@@ -54,6 +55,7 @@ async def upload_workforce(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     out = settings.appdata_path / "datasets" / _WF_PATH
     frame.to_parquet(out, index=False)
+    clear_workforce_cache()
     return {"ok": True, "rows": len(frame), "people": int(frame["Name"].nunique()) if "Name" in frame.columns else 0}
 
 
@@ -92,6 +94,12 @@ class CategoryBody(BaseModel):
     category: str | None = None
 
 
+class RosterBody(BaseModel):
+    name: str
+    afternoon: bool = False
+    project: str | None = None
+
+
 class TaskNoteBody(BaseModel):
     text: str
 
@@ -114,6 +122,7 @@ def workforce_people(
         "people": people,
         "positions": board_svc.unique_positions_from_people(people),
         "categories": list(CATEGORIES),
+        "projects": sorted(staffing_db.PROJECTS),
         "count": len(people),
         "as_of": as_of,
         "on_leave_count": on_leave,
@@ -136,6 +145,25 @@ def put_person_category(
     person = next((p for p in people if person_key(p.get("name", "")) == key), None)
     return {"name": body.name, "category": person.get("category") if person else body.category,
             "category_source": person.get("category_source") if person else None}
+
+
+@router.put("/people/roster")
+def put_person_roster(
+    body: RosterBody,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("planner", "admin")),
+):
+    try:
+        meta = staffing_db.set_roster_meta(
+            db,
+            body.name,
+            afternoon=body.afternoon,
+            project=body.project,
+            user_email=user.email,
+        )
+    except staffing_db.StaffingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return {"name": body.name, **meta}
 
 
 @router.get("/leave-missing")

@@ -210,6 +210,10 @@ def update_profile(
         profile.inactive = bool(inactive)
     db.commit()
     db.refresh(profile)
+    if inactive is not None:
+        from apps.api.services.workforce_board import clear_workforce_cache
+
+        clear_workforce_cache()
     return profile
 
 

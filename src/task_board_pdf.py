@@ -16,7 +16,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from src.staffing_categories import CATEGORIES, category_label, requirements_summary
+from src.staffing_categories import category_label, requirements_summary
 
 # Helvetica has no ő/ű, so prefer a TTF with full Latin Extended-A coverage.
 _FONT_CANDIDATES: tuple[tuple[str, str], ...] = (
@@ -135,7 +135,6 @@ LABELS: dict[str, dict[str, str]] = {
 TEAL = colors.HexColor("#0F766E")
 RED = colors.HexColor("#B91C1C")
 RED_BG = colors.HexColor("#FEE2E2")
-AMBER = colors.HexColor("#B45309")
 GREY = colors.HexColor("#6B7280")
 LIGHT = colors.HexColor("#F3F4F6")
 LINE = colors.HexColor("#D1D5DB")
@@ -303,13 +302,17 @@ def build_task_board_pdf(
     for task in tasks:
         status = _status(task)
         start, end = _day(task.get("start_date")), _day(task.get("end_date"))
-        member_ids = [pid for pid in [task.get("lead_id"), *(task.get("worker_ids") or [])] if pid]
-        members = [by_id.get(str(pid)) or {"id": pid, "name": pid} for pid in member_ids]
-        req = task.get("requirements") or {}
-        have: dict[str, int] = {}
-        for m in members:
-            if m.get("category"):
-                have[m["category"]] = have.get(m["category"], 0) + 1
+        worker_ids = [pid for pid in (task.get("worker_ids") or []) if pid]
+        members = [by_id.get(str(pid)) or {"id": pid, "name": pid} for pid in worker_ids]
+        if task.get("lead_id"):
+            lead_person = by_id.get(str(task.get("lead_id"))) or {
+                "id": task.get("lead_id"),
+                "name": task.get("lead_id"),
+            }
+        else:
+            lead_person = None
+        # PDF team table lists lead + workers; headcount is workers only.
+        listed = ([lead_person] if lead_person else []) + members
 
         block: list[Any] = []
         title_bar = Table(
@@ -329,21 +332,10 @@ def build_task_board_pdf(
         )
         block.append(title_bar)
 
-        req_parts: list[str] = []
-        for cat in CATEGORIES:
-            need = int(req.get(cat) or 0)
-            if need:
-                got = have.get(cat, 0)
-                color = TEAL if got == need else (RED if got > need else AMBER)
-                req_parts.append(
-                    f'{escape(category_label(cat, lang))}: <font name="{bold}" color="{color.hexval()}">{got}/{need}</font>'
-                )
-        size = int(task.get("size") or 0)
-        lead = by_id.get(str(task.get("lead_id"))) if task.get("lead_id") else None
+        lead = lead_person
         info = [
             [p(lbl["period"], cell_bold), p(_fmt_range(start, end) or lbl["no_dates"])],
-            [p(lbl["requirements"], cell_bold), Paragraph(" · ".join(req_parts) or lbl["none"], base)],
-            [p(lbl["headcount"], cell_bold), p(f"{len(members)}/{size}" if size else len(members))],
+            [p(lbl["headcount"], cell_bold), p(str(len(members)))],
             [p(lbl["lead"], cell_bold), p((lead or {}).get("name") or task.get("lead_id") or lbl["no_lead"])],
         ]
         info_table = Table(info, colWidths=[page_w * 0.2, page_w * 0.8])
@@ -368,10 +360,10 @@ def build_task_board_pdf(
             block += [Spacer(1, 1.5 * mm), box]
 
         block.append(Spacer(1, 1.5 * mm))
-        if members:
+        if listed:
             mrows: list[list[Any]] = [[p(h, cell_bold) for h in (lbl["name"], lbl["category"], lbl["position"], lbl["leave"])]]
             mstyle: list[tuple] = []
-            for i, m in enumerate(members, start=1):
+            for i, m in enumerate(listed, start=1):
                 is_lead = str(m.get("id") or m.get("name")) == str(task.get("lead_id"))
                 conflict = _overlap(m, start, end) if status != "done" else None
                 name = f"★ {m.get('name')}" if is_lead else str(m.get("name") or "")
@@ -413,7 +405,7 @@ def build_task_board_pdf(
                 block.append(p(f"{when} · {n.get('author_email') or ''}", small))
                 block.append(p(n.get("text") or "", base))
 
-        if len(members) <= 15 and len(task_notes) <= 5:
+        if len(listed) <= 15 and len(task_notes) <= 5:
             story.append(KeepTogether(block))
         else:
             story.append(KeepTogether(block[:2]))

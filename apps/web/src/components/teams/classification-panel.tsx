@@ -34,6 +34,8 @@ export function ClassificationPanel({
       .sort((a, b) => Number(Boolean(a.category)) - Number(Boolean(b.category)) || a.name.localeCompare(b.name));
   }, [people, onlyMissing, search]);
 
+  if (unclassified === 0) return null;
+
   return (
     <section className="mb-4 rounded-md border border-[#27272A] bg-[#0C0C0E]">
       <button

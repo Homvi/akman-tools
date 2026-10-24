@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { Check, FileSpreadsheet, Upload } from "lucide-react";
+import { Link } from "@/i18n/routing";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { TopProgress } from "@/components/progress-bar";
@@ -58,15 +59,40 @@ function FilePick({
   );
 }
 
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-md border border-[#27272A] bg-[#0C0C0E] p-4">
+      <h2 className="text-sm font-medium text-[#FAFAFA]">{title}</h2>
+      <p className="mt-1 text-xs text-[#71717A]">{description}</p>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+type Feedback = { ok: boolean; text: string } | null;
+
 export default function UploadPage() {
   const t = useTranslations("upload");
   const tc = useTranslations("common");
   const [hasDataset, setHasDataset] = useState(false);
   const [progressFile, setProgressFile] = useState<File | null>(null);
   const [gesamtFile, setGesamtFile] = useState<File | null>(null);
+  const [workforceFile, setWorkforceFile] = useState<File | null>(null);
+  const [areasFile, setAreasFile] = useState<File | null>(null);
+  const [liveFile, setLiveFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [msgOk, setMsgOk] = useState(false);
+  const [datasetMsg, setDatasetMsg] = useState<Feedback>(null);
+  const [workforceMsg, setWorkforceMsg] = useState<Feedback>(null);
+  const [areasMsg, setAreasMsg] = useState<Feedback>(null);
+  const [liveMsg, setLiveMsg] = useState<Feedback>(null);
 
   useEffect(() => {
     api
@@ -75,93 +101,260 @@ export default function UploadPage() {
       .catch(() => setHasDataset(false));
   }, []);
 
-  const canUpload = !!progressFile && (!!gesamtFile || hasDataset);
+  const canUploadDataset = !!progressFile && (!!gesamtFile || hasDataset);
 
-  async function upload() {
+  async function uploadDataset() {
     if (!progressFile) {
-      setMsgOk(false);
-      setMsg(t("needProgress"));
+      setDatasetMsg({ ok: false, text: t("needProgress") });
       return;
     }
     if (!gesamtFile && !hasDataset) {
-      setMsgOk(false);
-      setMsg(t("needGesamt"));
+      setDatasetMsg({ ok: false, text: t("needGesamt") });
       return;
     }
     const form = new FormData();
     form.append("status_file", progressFile);
     if (gesamtFile) form.append("catra_file", gesamtFile);
     setLoading(true);
-    setMsg("");
+    setDatasetMsg(null);
     try {
-      const res = await api.post<{ cable_count: number; status_name: string; catra_name: string; progress_as_of?: string }>(
-        "/dataset/upload",
-        form
-      );
-      setMsgOk(true);
-      setMsg(
-        t("uploaded", { count: res.cable_count.toLocaleString(), status: res.status_name }) +
+      const res = await api.post<{
+        cable_count: number;
+        status_name: string;
+        catra_name: string;
+        progress_as_of?: string;
+      }>("/dataset/upload", form);
+      setDatasetMsg({
+        ok: true,
+        text:
+          t("uploaded", { count: res.cable_count.toLocaleString(), status: res.status_name }) +
           (res.catra_name ? ` + ${res.catra_name}` : "") +
-          (res.progress_as_of ? t("asOf", { date: res.progress_as_of }) : "")
-      );
+          (res.progress_as_of ? t("asOf", { date: res.progress_as_of }) : ""),
+      });
       setProgressFile(null);
       setGesamtFile(null);
       setHasDataset(true);
       window.dispatchEvent(new Event("dataset-changed"));
     } catch (err) {
-      setMsgOk(false);
-      setMsg(err instanceof Error ? err.message : t("failed"));
+      setDatasetMsg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadWorkforce() {
+    if (!workforceFile) {
+      setWorkforceMsg({ ok: false, text: t("needWorkforce") });
+      return;
+    }
+    const form = new FormData();
+    form.append("file", workforceFile);
+    setLoading(true);
+    setWorkforceMsg(null);
+    try {
+      const res = await api.post<{ rows: number; people: number }>(
+        `/workforce/upload?year=${new Date().getFullYear()}`,
+        form
+      );
+      setWorkforceMsg({
+        ok: true,
+        text: t("workforceUploaded", {
+          people: res.people.toLocaleString(),
+          rows: res.rows.toLocaleString(),
+        }),
+      });
+      setWorkforceFile(null);
+      window.dispatchEvent(new Event("dataset-changed"));
+    } catch (err) {
+      setWorkforceMsg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadAreas() {
+    if (!areasFile) {
+      setAreasMsg({ ok: false, text: t("needAreas") });
+      return;
+    }
+    const form = new FormData();
+    form.append("file", areasFile);
+    setLoading(true);
+    setAreasMsg(null);
+    try {
+      const res = await api.post<{ count: number }>("/areas/upload", form);
+      setAreasMsg({ ok: true, text: t("areasUploaded", { count: res.count.toLocaleString() }) });
+      setAreasFile(null);
+    } catch (err) {
+      setAreasMsg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadLive() {
+    if (!liveFile) {
+      setLiveMsg({ ok: false, text: t("needLive") });
+      return;
+    }
+    const form = new FormData();
+    form.append("file", liveFile);
+    setLoading(true);
+    setLiveMsg(null);
+    try {
+      const res = await api.post<{ cable_count: number; file_name?: string }>(
+        "/near-complete/live-progressliste",
+        form
+      );
+      setLiveMsg({
+        ok: true,
+        text: t("liveUploaded", {
+          name: res.file_name || liveFile.name,
+          count: res.cable_count.toLocaleString(),
+        }),
+      });
+      setLiveFile(null);
+    } catch (err) {
+      setLiveMsg({ ok: false, text: err instanceof Error ? err.message : t("failed") });
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-3xl">
       <TopProgress show={loading} />
       <h1 className="text-2xl font-semibold tracking-tight text-[#FAFAFA]">{t("title")}</h1>
       <p className="mt-2 text-sm text-[#71717A]">{t("subtitle")}</p>
 
-      <div className="mt-6 flex flex-wrap gap-3">
-        <FilePick
-          label="Progressliste"
-          file={progressFile}
-          required
-          optionalLabel={tc("optional")}
-          chooseLabel={tc("chooseFile")}
-          selectedLabel={(kb) => tc("selectedKb", { kb })}
-          onPick={(f) => {
-            setProgressFile(f);
-            setMsgOk(true);
-            setMsg(f ? `Progressliste: ${f.name}` : "");
-          }}
-        />
-        <FilePick
-          label="Gesamtliste"
-          file={gesamtFile}
-          required={!hasDataset}
-          optionalLabel={tc("optional")}
-          chooseLabel={tc("chooseFile")}
-          selectedLabel={(kb) => tc("selectedKb", { kb })}
-          hint={hasDataset ? t("gesamtHint") : undefined}
-          onPick={(f) => {
-            setGesamtFile(f);
-            setMsgOk(true);
-            setMsg(f ? `Gesamtliste: ${f.name}` : "");
-          }}
-        />
-      </div>
+      <div className="mt-6 flex flex-col gap-4">
+        <Section title={t("datasetTitle")} description={t("datasetHint")}>
+          <div className="flex flex-wrap gap-3">
+            <FilePick
+              label="Progressliste"
+              file={progressFile}
+              required
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              onPick={setProgressFile}
+            />
+            <FilePick
+              label="Gesamtliste"
+              file={gesamtFile}
+              required={!hasDataset}
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              hint={hasDataset ? t("gesamtHint") : undefined}
+              onPick={setGesamtFile}
+            />
+          </div>
+          <div className="mt-3">
+            <Button variant="outline" onClick={() => void uploadDataset()} disabled={loading || !canUploadDataset}>
+              <Upload size={16} />
+              {t("submitDataset")}
+            </Button>
+          </div>
+          {datasetMsg && (
+            <p className={cn("mt-3 text-sm", datasetMsg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
+              {datasetMsg.text}
+            </p>
+          )}
+        </Section>
 
-      <div className="mt-4">
-        <Button variant="outline" onClick={upload} disabled={loading || !canUpload}>
-          <Upload size={16} />
-          {t("submit")}
-        </Button>
-      </div>
+        <Section title={t("workforceTitle")} description={t("workforceHint")}>
+          <div className="flex flex-wrap items-end gap-3">
+            <FilePick
+              label={t("workforceLabel")}
+              file={workforceFile}
+              required
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              onPick={setWorkforceFile}
+            />
+            <Button
+              variant="outline"
+              onClick={() => void uploadWorkforce()}
+              disabled={loading || !workforceFile}
+            >
+              <Upload size={16} />
+              {t("submitWorkforce")}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[#52525B]">
+            <Link href="/organisation" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+              {t("goOrganisation")}
+            </Link>
+            {" · "}
+            <Link href="/workforce" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+              {t("goWorkforce")}
+            </Link>
+          </p>
+          {workforceMsg && (
+            <p className={cn("mt-3 text-sm", workforceMsg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
+              {workforceMsg.text}
+            </p>
+          )}
+        </Section>
 
-      {msg && (
-        <p className={cn("mt-4 text-sm", msgOk ? "text-[#A1A1AA]" : "text-[#F87171]")}>{msg}</p>
-      )}
+        <Section title={t("areasTitle")} description={t("areasHint")}>
+          <div className="flex flex-wrap items-end gap-3">
+            <FilePick
+              label={t("areasLabel")}
+              file={areasFile}
+              required
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              onPick={setAreasFile}
+            />
+            <Button variant="outline" onClick={() => void uploadAreas()} disabled={loading || !areasFile}>
+              <Upload size={16} />
+              {t("submitAreas")}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[#52525B]">
+            <Link href="/areas" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+              {t("goAreas")}
+            </Link>
+          </p>
+          {areasMsg && (
+            <p className={cn("mt-3 text-sm", areasMsg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
+              {areasMsg.text}
+            </p>
+          )}
+        </Section>
+
+        <Section title={t("liveTitle")} description={t("liveHint")}>
+          <div className="flex flex-wrap items-end gap-3">
+            <FilePick
+              label={t("liveLabel")}
+              file={liveFile}
+              required
+              optionalLabel={tc("optional")}
+              chooseLabel={tc("chooseFile")}
+              selectedLabel={(kb) => tc("selectedKb", { kb })}
+              onPick={setLiveFile}
+            />
+            <Button variant="outline" onClick={() => void uploadLive()} disabled={loading || !liveFile}>
+              <Upload size={16} />
+              {t("submitLive")}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-[#52525B]">
+            <Link href="/near-complete" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+              {t("goNearComplete")}
+            </Link>
+          </p>
+          {liveMsg && (
+            <p className={cn("mt-3 text-sm", liveMsg.ok ? "text-[#A1A1AA]" : "text-[#F87171]")}>
+              {liveMsg.text}
+            </p>
+          )}
+        </Section>
+      </div>
     </div>
   );
 }

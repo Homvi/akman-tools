@@ -114,6 +114,7 @@ def set_category(db: Session, name: str, category: str | None, *, user_email: st
         row.category = category
         row.updated_by = user_email
     db.commit()
+    # Category/roster overlays are applied after list_people — frame/people caches stay valid.
 
 
 def set_roster_meta(

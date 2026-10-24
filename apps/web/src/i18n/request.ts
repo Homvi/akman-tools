@@ -8,6 +8,8 @@ export default getRequestConfig(async ({ requestLocale }) => {
 
   return {
     locale,
+    // Keep SSR + client formatting aligned (avoids hydration text mismatches).
+    timeZone: "Europe/Budapest",
     messages: (await import(`../../messages/${locale}.json`)).default,
   };
 });

@@ -150,6 +150,21 @@ def find_cables(df: pd.DataFrame, ids: list[str]) -> tuple[list[dict], list[str]
     return found, missing
 
 
+def find_cable_rows(df: pd.DataFrame, ids: list[str]) -> tuple[pd.DataFrame, list[str]]:
+    """Raw joined rows for export / pull-cards (order follows ``ids``)."""
+    rows: list[pd.Series] = []
+    missing: list[str] = []
+    for kabelnr in ids:
+        row = find_cable(df, kabelnr)
+        if row is None:
+            missing.append(kabelnr)
+        else:
+            rows.append(row)
+    if not rows:
+        return pd.DataFrame(), missing
+    return pd.DataFrame(rows), missing
+
+
 def _latest_stop_date(row: pd.Series) -> str | None:
     dates: list[pd.Timestamp] = []
     for col in ("Gestoppt_1", "Gestoppt_2", "Gestoppt_3"):

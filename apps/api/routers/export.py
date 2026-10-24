@@ -4,17 +4,35 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.db import get_db
 from apps.api.deps import require_roles
 from apps.api.models import User
 from apps.api.services import dataset as ds
-from apps.api.services.cable_lookup import find_cables, lookup_export_frame, parse_cable_ids
+from apps.api.services.cable_lookup import find_cable_rows, find_cables, lookup_export_frame, parse_cable_ids
 from apps.api.services.filters import filter_cables
 from src.pathways import cables_stopped_at
+from src.pull_cards_pdf import build_pull_cards_pdf
+from src.stutzen_filter import (
+    DEFAULT_EXPORT_COLUMNS,
+    export_column_catalog,
+    select_export_columns,
+)
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+class LookupExportBody(BaseModel):
+    ids: str
+    columns: list[str] = Field(default_factory=lambda: list(DEFAULT_EXPORT_COLUMNS))
+
+
+class LookupPullCardsBody(BaseModel):
+    ids: str
+    filter_note: str = ""
+    lang: str = "en"
 
 
 def _frame(db, **filters):
@@ -133,12 +151,67 @@ def export_device(
     )
 
 
+@router.get("/lookup/columns")
+def lookup_export_columns(_: User = Depends(require_roles("planner", "admin", "worker"))):
+    """Same column catalog / defaults as Stützen · Bahn / Filter."""
+    return {"columns": export_column_catalog(), "defaults": list(DEFAULT_EXPORT_COLUMNS)}
+
+
+def _lookup_rows(db: Session, ids_raw: str):
+    id_list = parse_cable_ids(ids_raw)
+    if not id_list:
+        raise HTTPException(status_code=400, detail="No cable IDs provided")
+    frame = ds.load_joined(db)
+    if frame is None or frame.empty:
+        raise HTTPException(status_code=404, detail="No dataset loaded")
+    rows, _missing = find_cable_rows(frame, id_list)
+    if rows.empty:
+        raise HTTPException(status_code=404, detail="No matching cables")
+    return id_list, rows
+
+
+@router.post("/lookup")
+def export_lookup_post(
+    body: LookupExportBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("planner", "admin", "worker")),
+):
+    _ids, rows = _lookup_rows(db, body.ids)
+    slim = select_export_columns(rows, body.columns)
+    data = ds.export_table(slim, sheet="Lookup")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="kabel_lookup.xlsx"'},
+    )
+
+
+@router.post("/lookup/pull-cards")
+def export_lookup_pull_cards(
+    body: LookupPullCardsBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("planner", "admin", "worker")),
+):
+    id_list, rows = _lookup_rows(db, body.ids)
+    note = (body.filter_note or "").strip() or "; ".join(id_list)
+    lang = (body.lang or "en").strip().lower()
+    if lang not in {"en", "hu", "de"}:
+        lang = "en"
+    data = build_pull_cards_pdf(rows, filter_note=note, lang=lang, highlight_nodes=[])
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="lookup_pull_cards.pdf"'},
+    )
+
+
 @router.get("/lookup")
 def export_lookup(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("planner", "admin", "worker")),
     ids: str = Query(..., description="Semicolon-separated Kabelnr list"),
 ):
+    """Legacy GET — full detail sheet (prefer POST /export/lookup with column selection)."""
     id_list = parse_cable_ids(ids)
     if not id_list:
         raise HTTPException(status_code=400, detail="No cable IDs provided")

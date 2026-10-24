@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { AlertTriangle, ChevronLeft, ChevronRight, MessageSquare } from "lucide-react";
 import { Link } from "@/i18n/routing";
 import { api } from "@/lib/api";
+import { cachedGet, invalidateApiCache, peekApiCache } from "@/lib/api-cache";
 import { Button } from "@/components/ui/button";
 import { TopProgress } from "@/components/progress-bar";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,10 @@ import {
   type Person,
   type Task,
 } from "@/lib/staffing";
+
+const PEOPLE_PATH = "/workforce/people";
+const BOARD_PATH = "/workforce/board";
+const NOTES_PATH = "/workforce/board/notes";
 
 type View = "gantt" | "month";
 type Zoom = 28 | 91;
@@ -54,9 +59,14 @@ export default function CalendarPage() {
   const t = useTranslations("calendar");
   const tc = useTranslations("common");
   const locale = useLocale();
-  const [board, setBoard] = useState<Board>({ tasks: [] });
-  const [people, setPeople] = useState<Person[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [board, setBoard] = useState<Board>(() => {
+    const hit = peekApiCache<Board>(BOARD_PATH);
+    return hit ? { tasks: (hit.tasks || []).map((task) => normalizeTask(task)) } : { tasks: [] };
+  });
+  const [people, setPeople] = useState<Person[]>(
+    () => peekApiCache<{ people: Person[] }>(PEOPLE_PATH)?.people || []
+  );
+  const [loading, setLoading] = useState(() => !peekApiCache(BOARD_PATH) && !peekApiCache(PEOPLE_PATH));
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("gantt");
   const [zoom, setZoom] = useState<Zoom>(28);
@@ -69,15 +79,20 @@ export default function CalendarPage() {
   const [latestNote, setLatestNote] = useState<Record<string, { count: number; text: string }>>({});
 
   async function load() {
-    setLoading(true);
+    const warm = Boolean(peekApiCache(BOARD_PATH) || peekApiCache(PEOPLE_PATH));
+    if (!warm) setLoading(true);
     setError("");
     try {
       const [boardRes, peopleRes, notesRes] = await Promise.all([
-        api.get<Board>("/workforce/board"),
-        api.get<{ people: Person[] }>("/workforce/people").catch(() => ({ people: [] as Person[] })),
-        api
-          .get<Record<string, { text: string }[]>>("/workforce/board/notes")
-          .catch(() => ({}) as Record<string, { text: string }[]>),
+        cachedGet(BOARD_PATH, () => api.get<Board>(BOARD_PATH)),
+        cachedGet(PEOPLE_PATH, () =>
+          api.get<{ people: Person[] }>(PEOPLE_PATH).catch(() => ({ people: [] as Person[] }))
+        ),
+        cachedGet(NOTES_PATH, () =>
+          api
+            .get<Record<string, { text: string }[]>>(NOTES_PATH)
+            .catch(() => ({}) as Record<string, { text: string }[]>)
+        ),
       ]);
       setBoard({ tasks: (boardRes.tasks || []).map((task) => normalizeTask(task)) });
       setPeople(peopleRes.people || []);
@@ -90,6 +105,8 @@ export default function CalendarPage() {
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : tc("loadFailed"));
+      invalidateApiCache(BOARD_PATH);
+      invalidateApiCache(PEOPLE_PATH);
     } finally {
       setLoading(false);
     }
@@ -229,7 +246,7 @@ export default function CalendarPage() {
       {!loading && !scheduled.length && (
         <div className="mb-4 rounded-md border border-dashed border-[#3F3F46] bg-[#0C0C0E]/60 p-4 text-sm text-[#A1A1AA]">
           {t("noScheduled")}{" "}
-          <Link href="/teams" className="text-[#2DD4BF] underline-offset-2 hover:underline">
+          <Link href="/tasks" className="text-[#2DD4BF] underline-offset-2 hover:underline">
             {t("goTeams")}
           </Link>
         </div>
@@ -273,7 +290,7 @@ export default function CalendarPage() {
         <div className="mt-4 rounded-md border border-[#27272A] bg-[#0C0C0E] p-3">
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-sm font-medium text-[#FAFAFA]">{t("unscheduled", { count: unscheduled.length })}</h2>
-            <Link href="/teams" className="text-xs text-[#2DD4BF] hover:underline">
+            <Link href="/tasks" className="text-xs text-[#2DD4BF] hover:underline">
               {t("goTeams")}
             </Link>
           </div>

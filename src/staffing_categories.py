@@ -11,8 +11,16 @@ CATEGORIES: tuple[str, ...] = (
     "long_distance_lead",
     "local_cabling_lead",
     "electrician_lead",
+    "engineer",
+    "warehouse_manager",
+    "iron_worker",
+    "iron_worker_lead",
+    "site_manager",
+    "administration",
 )
-LEAD_CATEGORIES: frozenset[str] = frozenset({"long_distance_lead", "local_cabling_lead", "electrician_lead"})
+LEAD_CATEGORIES: frozenset[str] = frozenset(
+    {"long_distance_lead", "local_cabling_lead", "electrician_lead", "iron_worker_lead"}
+)
 
 LABELS: dict[str, dict[str, str]] = {
     "hu": {
@@ -21,6 +29,12 @@ LABELS: dict[str, dict[str, str]] = {
         "long_distance_lead": "Távolsági kábelhúzó csoportvezető",
         "local_cabling_lead": "Helyi kábelező csoportvezető",
         "electrician_lead": "Villanyszerelő csoportvezető",
+        "engineer": "Mérnök",
+        "warehouse_manager": "Raktárvezető",
+        "iron_worker": "Lakatos",
+        "iron_worker_lead": "Lakatos csoportvezető",
+        "site_manager": "Építésvezető",
+        "administration": "Adminisztráció",
     },
     "en": {
         "cable_puller": "Cable puller",
@@ -28,6 +42,12 @@ LABELS: dict[str, dict[str, str]] = {
         "long_distance_lead": "Long-distance cable pull lead",
         "local_cabling_lead": "Local cabling lead",
         "electrician_lead": "Electrician lead",
+        "engineer": "Engineer",
+        "warehouse_manager": "Warehouse manager",
+        "iron_worker": "Iron worker",
+        "iron_worker_lead": "Iron worker lead",
+        "site_manager": "Construction manager",
+        "administration": "Administration",
     },
     "de": {
         "cable_puller": "Kabelzieher",
@@ -35,6 +55,12 @@ LABELS: dict[str, dict[str, str]] = {
         "long_distance_lead": "Vorarbeiter Fernkabelzug",
         "local_cabling_lead": "Vorarbeiter lokale Verkabelung",
         "electrician_lead": "Vorarbeiter Elektriker",
+        "engineer": "Ingenieur",
+        "warehouse_manager": "Lagerleiter",
+        "iron_worker": "Schlosser",
+        "iron_worker_lead": "Vorarbeiter Schlosser",
+        "site_manager": "Bauleiter",
+        "administration": "Verwaltung",
     },
 }
 
@@ -46,6 +72,34 @@ _POSITION_GUESS: dict[str, str] = {
     "electric": "electrician",
     "villanyszerelő": "electrician",
     "cable pull team leader": "long_distance_lead",
+    "engineer": "engineer",
+    "mérnök": "engineer",
+    "mernok": "engineer",
+    "ingenieur": "engineer",
+    "warehouse manager": "warehouse_manager",
+    "wharehouse manager": "warehouse_manager",
+    "raktárvezető": "warehouse_manager",
+    "raktarvezeto": "warehouse_manager",
+    "lagerleiter": "warehouse_manager",
+    "iron worker": "iron_worker",
+    "lakatos": "iron_worker",
+    "schlosser": "iron_worker",
+    "lakatos csoportvezető": "iron_worker_lead",
+    "lakatos csoportvezeto": "iron_worker_lead",
+    "iron worker lead": "iron_worker_lead",
+    "iron worker team lead": "iron_worker_lead",
+    "site manager": "site_manager",
+    "construction manager": "site_manager",
+    "építésvezető": "site_manager",
+    "epitesvezeto": "site_manager",
+    "bauleiter": "site_manager",
+    "office": "administration",
+    "administration": "administration",
+    "adminisztráció": "administration",
+    "adminisztracio": "administration",
+    "iroda": "administration",
+    "büro": "administration",
+    "verwaltung": "administration",
 }
 
 
