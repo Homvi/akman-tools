@@ -61,6 +61,8 @@ class WorkerProfile(Base):
     address: Mapped[str] = mapped_column(String(512), default="")
     languages_json: Mapped[str] = mapped_column(Text, default="[]")
     photo_path: Mapped[str] = mapped_column(String(1024), default="")
+    # Manually marked as no longer on site — survives Excel re-upload; hidden from roster.
+    inactive: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -93,6 +95,21 @@ class WorkerCategory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     person_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     category: Mapped[str] = mapped_column(String(64))
+    updated_by: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkerRosterMeta(Base):
+    """Manual afternoon-shift + project flags (survive Excel re-upload)."""
+
+    __tablename__ = "worker_roster_meta"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    person_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    afternoon: Mapped[bool] = mapped_column(Boolean, default=False)
+    project: Mapped[str] = mapped_column(String(16), default="")
     updated_by: Mapped[str] = mapped_column(String(255), default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

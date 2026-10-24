@@ -57,11 +57,13 @@ type WorkerDetail = {
   in_workforce: boolean;
   person: Person | null;
   current_task: CurrentTask | null;
+  tasks?: CurrentTask[];
   profile: {
     phone: string;
     address: string;
     languages: string[];
     has_photo: boolean;
+    inactive: boolean;
     updated_at: string | null;
   };
   rating: { average: number | null; count: number };
@@ -309,7 +311,9 @@ export default function WorkerPage() {
 
   const q = qs({ name });
 
-  function saveProfile(patch: Partial<{ phone: string; address: string; languages: string[] }>) {
+  function saveProfile(
+    patch: Partial<{ phone: string; address: string; languages: string[]; inactive: boolean }>
+  ) {
     return run(() => api.put<WorkerDetail>(`/workers/profile${q}`, patch));
   }
 
@@ -404,7 +408,7 @@ export default function WorkerPage() {
   }
 
   const backLink = (
-    <Link href="/teams" className="mb-4 inline-flex items-center gap-1 text-sm text-[#A1A1AA] hover:text-[#FAFAFA]">
+    <Link href="/tasks" className="mb-4 inline-flex items-center gap-1 text-sm text-[#A1A1AA] hover:text-[#FAFAFA]">
       <ArrowLeft className="h-4 w-4" />
       {t("back")}
     </Link>
@@ -435,9 +439,11 @@ export default function WorkerPage() {
   const onLeaveNow = Boolean(person?.on_leave);
   const nextWeek = person ? leaveOverlapsNextWeek(person) : false;
   const leaves = person ? personLeaveRanges(person) : [];
-  const task = detail?.current_task || null;
-  const range = task ? taskRange(task) : null;
-  const conflict = person && range ? leaveInRange(person, range.start, range.end) : null;
+  const tasks = detail?.tasks?.length
+    ? detail.tasks
+    : detail?.current_task
+      ? [detail.current_task]
+      : [];
   const photoSrc =
     preview ||
     (detail?.profile.has_photo && !photoBroken
@@ -519,7 +525,11 @@ export default function WorkerPage() {
                     {t("lead")}
                   </span>
                 ) : null}
-                {!detail.in_workforce ? (
+                {detail.profile.inactive ? (
+                  <span className="rounded bg-[#EF4444]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#FCA5A5]">
+                    {t("statusInactive")}
+                  </span>
+                ) : !detail.in_workforce ? (
                   <span className="rounded bg-[#27272A] px-1.5 py-0.5 text-[10px] text-[#A1A1AA]">
                     {t("notInWorkforce")}
                   </span>
@@ -532,12 +542,25 @@ export default function WorkerPage() {
                     {t("statusAvailable")}
                   </span>
                 )}
-                {nextWeek ? (
+                {nextWeek && !detail.profile.inactive ? (
                   <span className="rounded bg-[#F97316] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
                     {t("statusLeaveNextWeek")}
                   </span>
                 ) : null}
               </div>
+              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-[#E4E4E7]">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-[#3F3F46] bg-[#18181B] text-[#EF4444] focus:ring-[#EF4444]"
+                  checked={Boolean(detail.profile.inactive)}
+                  disabled={busy}
+                  onChange={(e) => void saveProfile({ inactive: e.target.checked })}
+                />
+                <span>{t("markInactive")}</span>
+              </label>
+              {detail.profile.inactive ? (
+                <p className="mt-1 text-xs text-[#A1A1AA]">{t("markInactiveHint")}</p>
+              ) : null}
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[#71717A]">
                 {detail.rating.count ? (
                   <span className="inline-flex items-center gap-1.5">
@@ -556,47 +579,55 @@ export default function WorkerPage() {
           </header>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Card title={t("currentTask")}>
-              {task ? (
-                <div className="space-y-1.5 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-[#FAFAFA]">{task.title}</span>
-                    <span
-                      className={cn(
-                        "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                        task.role === "lead" ? "bg-[#F59E0B]/20 text-[#FCD34D]" : "bg-[#27272A] text-[#A1A1AA]"
-                      )}
-                    >
-                      {task.role === "lead" ? t("roleLead") : t("roleWorker")}
-                    </span>
-                    {task.done ? (
-                      <span className="rounded bg-[#3F3F46] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#E4E4E7]">
-                        {t("taskDone")}
-                      </span>
-                    ) : task.blocker ? (
-                      <span className="rounded bg-[#EF4444]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#FCA5A5]">
-                        {t("taskBlocked")}
-                      </span>
-                    ) : null}
-                  </div>
-                  {range ? (
-                    <p className="text-xs text-[#5EEAD4]">
-                      {shortFmt.format(range.start)} – {shortFmt.format(range.end)}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-[#71717A]">{t("noTaskDates")}</p>
-                  )}
-                  {task.blocker && task.blocker_note ? (
-                    <p className="text-xs text-[#FCA5A5]">{task.blocker_note}</p>
-                  ) : null}
-                  {conflict ? (
-                    <p className="inline-flex items-center gap-1 rounded bg-[#EF4444] px-2 py-1 text-xs font-semibold text-white">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      {t("leaveConflict", { range: formatShortRange(conflict) })}
-                    </p>
-                  ) : null}
+            <Card title={tasks.length > 1 ? t("currentTasks") : t("currentTask")}>
+              {tasks.length ? (
+                <div className="space-y-3">
+                  {tasks.map((task) => {
+                    const range = taskRange(task);
+                    const conflict = person && range ? leaveInRange(person, range.start, range.end) : null;
+                    return (
+                      <div key={`${task.role}-${task.id}`} className="space-y-1.5 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-[#FAFAFA]">{task.title}</span>
+                          <span
+                            className={cn(
+                              "rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide",
+                              task.role === "lead" ? "bg-[#F59E0B]/20 text-[#FCD34D]" : "bg-[#27272A] text-[#A1A1AA]"
+                            )}
+                          >
+                            {task.role === "lead" ? t("roleLead") : t("roleWorker")}
+                          </span>
+                          {task.done ? (
+                            <span className="rounded bg-[#3F3F46] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#E4E4E7]">
+                              {t("taskDone")}
+                            </span>
+                          ) : task.blocker ? (
+                            <span className="rounded bg-[#EF4444]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#FCA5A5]">
+                              {t("taskBlocked")}
+                            </span>
+                          ) : null}
+                        </div>
+                        {range ? (
+                          <p className="text-xs text-[#5EEAD4]">
+                            {shortFmt.format(range.start)} – {shortFmt.format(range.end)}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-[#71717A]">{t("noTaskDates")}</p>
+                        )}
+                        {task.blocker && task.blocker_note ? (
+                          <p className="text-xs text-[#FCA5A5]">{task.blocker_note}</p>
+                        ) : null}
+                        {conflict ? (
+                          <p className="inline-flex items-center gap-1 rounded bg-[#EF4444] px-2 py-1 text-xs font-semibold text-white">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            {t("leaveConflict", { range: formatShortRange(conflict) })}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                   <div>
-                    <Link href="/teams" className="text-xs text-[#2DD4BF] hover:underline">
+                    <Link href="/tasks" className="text-xs text-[#2DD4BF] hover:underline">
                       {t("openTeams")}
                     </Link>
                   </div>

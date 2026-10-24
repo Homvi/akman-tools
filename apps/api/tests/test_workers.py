@@ -86,6 +86,17 @@ def test_profile_upsert_and_language_normalization(db):
     assert profile["phone"] == "+36 30 123 4567"
     assert profile["address"] == "Budapest, Fő utca 1."
     assert profile["languages"] == ["magyar", "angol"]
+    assert profile["inactive"] is False
+
+
+def test_profile_inactive_flag(db):
+    assert detail(db)["profile"]["inactive"] is False
+    svc.update_profile(db, "Kovács Anna", inactive=True)
+    assert detail(db)["profile"]["inactive"] is True
+    assert svc.person_key("Kovács Anna") in svc.inactive_person_keys(db)
+    svc.update_profile(db, "Kovács Anna", inactive=False)
+    assert detail(db)["profile"]["inactive"] is False
+    assert svc.person_key("Kovács Anna") not in svc.inactive_person_keys(db)
 
 
 def test_ratings_range_average_and_author_delete(db):

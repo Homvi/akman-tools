@@ -10,6 +10,7 @@ from apps.api.db import Base, SessionLocal, engine
 from apps.api.routers import (
     areas,
     auth,
+    cable_filter,
     cables,
     calculator,
     dataset,
@@ -28,11 +29,13 @@ from apps.api.routers import (
     workforce,
 )
 from apps.api.services.bootstrap import ensure_roles_and_admin
+from apps.api.services.schema_patch import ensure_schema_patches
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_schema_patches()
     db = SessionLocal()
     try:
         ensure_roles_and_admin(db)
@@ -61,6 +64,7 @@ app.include_router(errors.router)
 app.include_router(stopped.router)
 app.include_router(near_complete.router)
 app.include_router(stutzen.router)
+app.include_router(cable_filter.router)
 app.include_router(ids.router)
 app.include_router(calculator.router)
 app.include_router(stichmass.router)

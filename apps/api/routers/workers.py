@@ -19,6 +19,7 @@ class ProfileBody(BaseModel):
     phone: str | None = None
     address: str | None = None
     languages: list[str] | None = None
+    inactive: bool | None = None
 
 
 class RatingBody(BaseModel):
@@ -58,7 +59,14 @@ def put_profile(
     _: User = Depends(_staff),
 ):
     try:
-        svc.update_profile(db, name, phone=body.phone, address=body.address, languages=body.languages)
+        svc.update_profile(
+            db,
+            name,
+            phone=body.phone,
+            address=body.address,
+            languages=body.languages,
+            inactive=body.inactive,
+        )
     except svc.WorkerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     return _detail(db, name)

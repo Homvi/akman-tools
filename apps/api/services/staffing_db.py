@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.models import TaskNote, WorkerCategory, WorkerRosterMeta
 from apps.api.services import workforce_board as board_svc
-from apps.api.services.workers import person_key
+from apps.api.services.workers import inactive_person_keys, person_key
 from src.staffing_categories import apply_categories, is_category
 
 MAX_TASK_NOTE = 5000
@@ -56,7 +56,12 @@ def apply_roster_meta(db: Session, people: list[dict[str, Any]]) -> list[dict[st
 
 
 def people_with_categories(db: Session, people: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return apply_roster_meta(db, apply_categories(people, category_overrides(db), key_of=person_key))
+    enriched = apply_roster_meta(db, apply_categories(people, category_overrides(db), key_of=person_key))
+    gone = inactive_person_keys(db)
+    if not gone:
+        return enriched
+    # Drop people marked inactive on their profile; keep flag if callers need it later.
+    return [p for p in enriched if person_key(p.get("name", "")) not in gone]
 
 
 def load_people(db: Session) -> list[dict[str, Any]] | None:

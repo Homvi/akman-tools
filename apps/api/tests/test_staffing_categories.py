@@ -97,6 +97,18 @@ def test_roster_meta_afternoon_and_project_survives_people_reload(db):
     assert anna["project"] is None
 
 
+def test_people_with_categories_hides_inactive_profiles(db):
+    from apps.api.services import workers as worker_svc
+
+    people = [
+        {"id": "Anna", "name": "Anna", "position": "Cable puller", "is_lead": False},
+        {"id": "Béla", "name": "Béla", "position": "Electrician", "is_lead": False},
+    ]
+    worker_svc.update_profile(db, "Anna", inactive=True)
+    names = {p["name"] for p in staffing_db.people_with_categories(db, people)}
+    assert names == {"Béla"}
+
+
 def test_roster_meta_legacy_unsorted_key_still_applies(db):
     """Old DB rows used casefold-without-sort; identity key must still find them."""
     from apps.api.models import WorkerRosterMeta

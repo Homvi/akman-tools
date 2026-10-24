@@ -158,6 +158,7 @@ def get_worker_detail(
             "address": profile.address if profile else "",
             "languages": _languages(profile.languages_json) if profile else [],
             "has_photo": bool(profile and profile.photo_path and Path(profile.photo_path).exists()),
+            "inactive": bool(profile.inactive) if profile else False,
             "updated_at": _iso(profile.updated_at) if profile else None,
         },
         "rating": {"average": average, "count": len(ratings)},
@@ -196,6 +197,7 @@ def update_profile(
     phone: str | None = None,
     address: str | None = None,
     languages: list[Any] | None = None,
+    inactive: bool | None = None,
 ) -> WorkerProfile:
     profile = _ensure_profile(db, name)
     if phone is not None:
@@ -204,9 +206,21 @@ def update_profile(
         profile.address = str(address).strip()[:512]
     if languages is not None:
         profile.languages_json = json.dumps(normalize_languages(languages), ensure_ascii=False)
+    if inactive is not None:
+        profile.inactive = bool(inactive)
     db.commit()
     db.refresh(profile)
     return profile
+
+
+def inactive_person_keys(db: Session) -> set[str]:
+    """Identity keys marked as no longer working on site."""
+    keys: set[str] = set()
+    for row in db.query(WorkerProfile).filter(WorkerProfile.inactive.is_(True)).all():
+        key = person_key(row.person_key)
+        if key:
+            keys.add(key)
+    return keys
 
 
 def add_rating(db: Session, name: str, *, stars: int, comment: str, author_email: str) -> WorkerRating:
