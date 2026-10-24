@@ -273,7 +273,10 @@
     "leaveSoon": "Urlaub",
     "leaveNow": "Im Urlaub",
     "leaveNextWeek": "Urlaub nächste Woche",
-    "renameTask": "Task umbenennen"  },
+    "renameTask": "Task umbenennen",
+    "searchPeople": "Nach Name oder Position suchen…",
+    "noSearchResults": "Keine Treffer"
+  },
   "routes": {
     "title": "Trassen",
     "subtitle": "Trassenvorschau."

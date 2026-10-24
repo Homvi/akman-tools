@@ -3,7 +3,7 @@
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +96,14 @@ function formatLeaveHint(person: Person, leaveLabel: string): string | null {
     return `${leaveLabel} ${start}–${end}`;
   }
   return `${leaveLabel} ${start}`;
+}
+
+function normalizeSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
 }
 
 function PersonChip({
@@ -204,6 +212,8 @@ export default function TeamsPage() {
   const [newTaskSize, setNewTaskSize] = useState("4");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [personSearch, setPersonSearch] = useState("");
+
   async function load() {
     setLoading(true);
     setError("");
@@ -276,7 +286,14 @@ export default function TeamsPage() {
     return ids;
   }, [board.tasks]);
 
-  const pool = filteredPeople.filter((p) => !assignedIds.has(p.id));
+  const searchNeedle = normalizeSearch(personSearch);
+  const pool = filteredPeople.filter(
+    (p) =>
+      !assignedIds.has(p.id) &&
+      (!searchNeedle ||
+        normalizeSearch(p.name).includes(searchNeedle) ||
+        normalizeSearch(p.position || "").includes(searchNeedle))
+  );
   const poolLeads = pool.filter((p) => p.is_lead);
   const poolWorkers = pool.filter((p) => !p.is_lead);
 
@@ -550,6 +567,20 @@ export default function TeamsPage() {
               <span className="text-xs text-[#71717A]">{pool.length}</span>
             </div>
             <p className="mb-2 text-[11px] text-[#71717A]">{t("poolHint")}</p>
+            <div className="relative mb-3">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#71717A]" />
+              <Input
+                type="search"
+                value={personSearch}
+                onChange={(e) => setPersonSearch(e.target.value)}
+                placeholder={t("searchPeople")}
+                className="h-8 pl-7 text-sm"
+              />
+            </div>
+            {searchNeedle && pool.length === 0 && (
+              <p className="mb-2 text-xs text-[#71717A]">{t("noSearchResults")}</p>
+            )}
+
             {poolLeads.length > 0 && (
               <>
                 <p className="mb-1 text-[10px] uppercase tracking-wide text-[#F59E0B]">{t("leads")}</p>

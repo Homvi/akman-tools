@@ -273,7 +273,10 @@
     "leaveSoon": "szabadság",
     "leaveNow": "Most szabin",
     "leaveNextWeek": "Jövő héten szabi",
-    "renameTask": "Task átnevezése"  },
+    "renameTask": "Task átnevezése",
+    "searchPeople": "Keresés név vagy pozíció alapján…",
+    "noSearchResults": "Nincs találat"
+  },
   "routes": {
     "title": "Nyomvonalak",
     "subtitle": "Nyomvonal-előnézet."

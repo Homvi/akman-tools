@@ -273,7 +273,10 @@
     "leaveSoon": "leave",
     "leaveNow": "On leave",
     "leaveNextWeek": "Leave next week",
-    "renameTask": "Rename task"  },
+    "renameTask": "Rename task",
+    "searchPeople": "Search by name or position…",
+    "noSearchResults": "No matches"
+  },
   "routes": {
     "title": "Routes",
     "subtitle": "Route preview."
