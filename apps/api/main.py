@@ -18,6 +18,7 @@ from apps.api.routers import (
     export,
     ids,
     near_complete,
+    notifications,
     progress,
     routes,
     stichmass,
@@ -66,6 +67,7 @@ app.include_router(progress.router)
 app.include_router(workforce.router)
 app.include_router(areas.router)
 app.include_router(routes.router)
+app.include_router(notifications.router)
 
 
 @app.get("/health")

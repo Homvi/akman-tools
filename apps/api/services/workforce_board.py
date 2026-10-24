@@ -169,6 +169,38 @@ def _leave_window(
     return start, end
 
 
+def _bridges_weekend(prev_end: date, nxt: date) -> bool:
+    """True when only Saturday/Sunday lie between prev_end and nxt."""
+    gap = prev_end + timedelta(days=1)
+    while gap < nxt:
+        if gap.weekday() < 5:
+            return False
+        gap += timedelta(days=1)
+    return True
+
+
+def _leave_ranges(person_rows: pd.DataFrame, *, from_day: date) -> list[dict[str, str]]:
+    """All continuous leave blocks (weekends bridged) that end on/after from_day."""
+    if person_rows.empty or "Status" not in person_rows.columns:
+        return []
+    leave = person_rows.copy()
+    leave["Date"] = pd.to_datetime(leave["Date"], errors="coerce")
+    leave = leave.dropna(subset=["Date"])
+    leave = leave[leave["Status"].astype(str).str.lower().eq("leave")]
+    days = sorted({ts.date() for ts in leave["Date"]})
+    blocks: list[tuple[date, date]] = []
+    for d in days:
+        if blocks and _bridges_weekend(blocks[-1][1], d):
+            blocks[-1] = (blocks[-1][0], d)
+        else:
+            blocks.append((d, d))
+    return [
+        {"start": start.isoformat(), "end": end.isoformat()}
+        for start, end in blocks
+        if end >= from_day
+    ]
+
+
 def list_people(
     df: pd.DataFrame | None = None,
     *,
@@ -241,7 +273,9 @@ def list_people(
 
         position = str(row.get("Position") or "")
         available = name in present_names
-        leave_start, leave_end = _leave_window(view[view["Name"].str.casefold() == key], from_day=day)
+        person_rows = view[view["Name"].str.casefold() == key]
+        leave_start, leave_end = _leave_window(person_rows, from_day=day)
+        leave_ranges = _leave_ranges(person_rows, from_day=day)
         on_leave_now = False
         if leave_start and leave_end and leave_start <= day <= leave_end:
             on_leave_now = True
@@ -261,6 +295,7 @@ def list_people(
                 "last_present": pd.Timestamp(last).date().isoformat(),
                 "leave_start": leave_start.isoformat() if leave_start else None,
                 "leave_end": leave_end.isoformat() if leave_end else None,
+                "leave_ranges": leave_ranges,
                 "as_of": day.isoformat(),
             }
         )
@@ -302,6 +337,30 @@ def _parse_size(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, min(size, 999))
+
+
+_BLOCKER_NOTE_MAX = 500
+
+
+def _parse_iso_day(value: Any) -> date | None:
+    if value in (None, "", "null"):
+        return None
+    try:
+        return date.fromisoformat(str(value).strip()[:10])
+    except ValueError:
+        return None
+
+
+def _parse_date_range(item: dict[str, Any]) -> tuple[str | None, str | None]:
+    start = _parse_iso_day(item.get("start_date"))
+    end = _parse_iso_day(item.get("end_date"))
+    if start and end and end < start:
+        start, end = end, start
+    return (start.isoformat() if start else None, end.isoformat() if end else None)
+
+
+def _parse_blocker_note(value: Any) -> str:
+    return str(value or "").strip()[:_BLOCKER_NOTE_MAX]
 
 
 def _migrate_legacy_board(raw: dict[str, Any]) -> list[dict[str, Any]]:
@@ -434,6 +493,7 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
             claimed.add(pid)
             worker_ids.append(pid)
 
+        start_date, end_date = _parse_date_range(item)
         tasks.append(
             {
                 "id": task_id,
@@ -442,7 +502,10 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
                 "lead_id": lead_id,
                 "worker_ids": worker_ids,
                 "blocker": bool(item.get("blocker")),
+                "blocker_note": _parse_blocker_note(item.get("blocker_note")),
                 "done": bool(item.get("done")),
+                "start_date": start_date,
+                "end_date": end_date,
                 "order": order,
             }
         )

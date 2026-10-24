@@ -134,3 +134,47 @@ def test_migrate_legacy_teams_to_tasks(tmp_path, monkeypatch):
     assert saved["tasks"][0]["title"] == "Deck 3"
     assert saved["tasks"][0]["size"] == 5
     assert set(saved["tasks"][0]["worker_ids"]) == {"Anna", "Béla", "Cecil"}
+    assert saved["tasks"][0]["start_date"] is None
+    assert saved["tasks"][0]["blocker_note"] == ""
+
+
+def test_normalize_task_dates_and_blocker_note(tmp_path, monkeypatch):
+    monkeypatch.setattr(board_svc, "board_path", lambda: tmp_path / "workforce_board.json")
+    saved = board_svc.save_board(
+        {
+            "tasks": [
+                {
+                    "title": "Swapped",
+                    "start_date": "2026-11-14",
+                    "end_date": "2026-10-27T00:00:00",
+                    "blocker": True,
+                    "blocker_note": "  waiting for tray  " + "x" * 600,
+                },
+                {"title": "Bad", "start_date": "nope", "end_date": ""},
+            ]
+        }
+    )
+    first, second = saved["tasks"]
+    assert first["start_date"] == "2026-10-27"
+    assert first["end_date"] == "2026-11-14"
+    assert first["blocker_note"].startswith("waiting for tray")
+    assert len(first["blocker_note"]) == 500
+    assert second["start_date"] is None
+    assert second["end_date"] is None
+
+
+def test_list_people_leave_ranges_bridge_weekends():
+    from datetime import date
+
+    rows = [{"Date": "2026-10-20", "Name": "Eva", "Position": "Cable puller", "Present": True, "Status": "work"}]
+    # Fri 2026-10-30 + Mon/Tue 11-02..03 → one block; 11-16 → separate block
+    for d in ("2026-10-30", "2026-11-02", "2026-11-03", "2026-11-16"):
+        rows.append({"Date": d, "Name": "Eva", "Position": "Cable puller", "Present": False, "Status": "leave"})
+    # A past block that ended before as_of is dropped
+    rows.append({"Date": "2026-10-05", "Name": "Eva", "Position": "Cable puller", "Present": False, "Status": "leave"})
+    people = board_svc.list_people(pd.DataFrame(rows), as_of=date(2026, 10, 23))
+    eva = next(p for p in people if p["name"] == "Eva")
+    assert eva["leave_ranges"] == [
+        {"start": "2026-10-30", "end": "2026-11-03"},
+        {"start": "2026-11-16", "end": "2026-11-16"},
+    ]
