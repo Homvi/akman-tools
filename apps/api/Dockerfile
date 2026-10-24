@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev \
+    build-essential libpq-dev fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY apps/api/requirements.txt /app/apps/api/requirements.txt
