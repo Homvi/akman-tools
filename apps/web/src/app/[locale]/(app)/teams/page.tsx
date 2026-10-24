@@ -3,7 +3,8 @@
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
-import { AlertTriangle, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Info, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { isStaff, useMe } from "@/components/auth-gate";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +75,8 @@ function PersonChip({
   onDragStart: (id: string) => void;
   onSelect?: (id: string) => void;
 }) {
+  const t = useTranslations("teams");
+  const canSeeDetails = isStaff(useMe());
   const leaveHint = formatLeaveHint(person, leaveLabel);
   const onLeaveNow = Boolean(person.on_leave);
   const nextWeek = leaveOverlapsNextWeek(person);
@@ -125,8 +128,22 @@ function PersonChip({
           </div>
         ) : null}
       </div>
-      {person.position ? (
-        <div className="mt-0.5 text-[11px] text-[#A1A1AA]">{person.position}</div>
+      {person.position || canSeeDetails ? (
+        <div className="mt-0.5 flex items-center justify-between gap-2 text-[11px] text-[#A1A1AA]">
+          <span className="min-w-0 truncate">{person.position}</span>
+          {canSeeDetails ? (
+            <Link
+              href={`/workers/${encodeURIComponent(person.id)}`}
+              draggable={false}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-[#71717A] hover:bg-[#27272A] hover:text-[#5EEAD4]"
+            >
+              <Info className="h-3 w-3" />
+              {t("details")}
+            </Link>
+          ) : null}
+        </div>
       ) : null}
       {conflictText ? (
         <div className="mt-1 inline-flex items-center gap-1 rounded bg-[#EF4444] px-1.5 py-0.5 text-[10px] font-bold text-white">

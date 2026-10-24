@@ -1,12 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
 import { api } from "@/lib/api";
 import { AppShell } from "@/components/app-shell";
 
-type Me = { email: string; roles: string[] };
+export type Me = { email: string; roles: string[] };
+
+const MeContext = createContext<Me | null>(null);
+
+export function useMe(): Me | null {
+  return useContext(MeContext);
+}
+
+export function isStaff(me: Me | null): boolean {
+  return Boolean(me?.roles.some((r) => r === "planner" || r === "admin"));
+}
 type Dataset = { loaded: boolean; cable_count?: number; progress_as_of?: string | null };
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
@@ -68,12 +78,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AppShell
-      loading={busy}
-      onLogout={logout}
-      status={{ loaded: !!dataset?.loaded, progressAsOf: dataset?.progress_as_of }}
-    >
-      {children}
-    </AppShell>
+    <MeContext.Provider value={me}>
+      <AppShell
+        loading={busy}
+        onLogout={logout}
+        status={{ loaded: !!dataset?.loaded, progressAsOf: dataset?.progress_as_of }}
+      >
+        {children}
+      </AppShell>
+    </MeContext.Provider>
   );
 }
