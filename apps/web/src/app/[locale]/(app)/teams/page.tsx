@@ -3,7 +3,7 @@
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
-import { Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +61,33 @@ function parseSize(raw: string): number {
   return Math.min(n, 999);
 }
 
+function parseIsoDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(`${value}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Next calendar week Mon–Sun relative to `today`. */
+function nextWeekRange(today = new Date()): { start: Date; end: Date } {
+  const base = new Date(today);
+  base.setHours(12, 0, 0, 0);
+  const dow = base.getDay(); // 0=Sun … 6=Sat
+  const daysUntilNextMon = dow === 0 ? 1 : 8 - dow;
+  const start = new Date(base);
+  start.setDate(base.getDate() + daysUntilNextMon);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return { start, end };
+}
+
+function leaveOverlapsNextWeek(person: Person, today = new Date()): boolean {
+  const leaveStart = parseIsoDate(person.leave_start);
+  if (!leaveStart) return false;
+  const leaveEnd = parseIsoDate(person.leave_end) || leaveStart;
+  const { start, end } = nextWeekRange(today);
+  return leaveStart <= end && leaveEnd >= start;
+}
+
 function formatLeaveHint(person: Person, leaveLabel: string): string | null {
   if (!person.leave_start) return null;
   const start = person.leave_start.slice(5).replace("-", ".");
@@ -76,6 +103,8 @@ function PersonChip({
   dragging,
   selected,
   leaveLabel,
+  nowLeaveLabel,
+  nextWeekLeaveLabel,
   onDragStart,
   onSelect,
 }: {
@@ -83,10 +112,14 @@ function PersonChip({
   dragging?: boolean;
   selected?: boolean;
   leaveLabel: string;
+  nowLeaveLabel: string;
+  nextWeekLeaveLabel: string;
   onDragStart: (id: string) => void;
   onSelect?: (id: string) => void;
 }) {
   const leaveHint = formatLeaveHint(person, leaveLabel);
+  const onLeaveNow = Boolean(person.on_leave);
+  const nextWeek = leaveOverlapsNextWeek(person);
   return (
     <div
       draggable
@@ -101,17 +134,54 @@ function PersonChip({
         person.is_lead
           ? "border-[#F59E0B]/50 bg-[#F59E0B]/15 text-[#FCD34D]"
           : "border-[#27272A] bg-[#18181B] text-[#E4E4E7]",
-        person.on_leave && "opacity-70",
+        nextWeek && !onLeaveNow && "border-[#F97316] bg-[#F97316]/15 ring-1 ring-[#F97316]/70",
+        onLeaveNow && "border-[#EF4444] bg-[#EF4444]/15 ring-1 ring-[#EF4444]/70",
         selected && "ring-2 ring-[#2DD4BF]",
         dragging && "opacity-50"
       )}
-      title={[person.position, leaveHint].filter(Boolean).join(" · ") || undefined}
+      title={[
+        person.position,
+        leaveHint,
+        onLeaveNow ? nowLeaveLabel : null,
+        nextWeek ? nextWeekLeaveLabel : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || undefined}
     >
-      <div className="font-medium leading-tight">{person.name}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 break-words font-medium leading-tight">{person.name}</div>
+        {onLeaveNow || nextWeek ? (
+          <div className="flex shrink-0 flex-col items-end gap-0.5">
+            {onLeaveNow ? (
+              <span className="rounded bg-[#EF4444] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                {nowLeaveLabel}
+              </span>
+            ) : null}
+            {nextWeek ? (
+              <span className="rounded bg-[#F97316] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
+                {nextWeekLeaveLabel}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
       {person.position ? (
         <div className="mt-0.5 text-[11px] text-[#A1A1AA]">{person.position}</div>
       ) : null}
-      {leaveHint ? <div className="mt-0.5 text-[10px] text-[#FBBF24]">{leaveHint}</div> : null}
+      {leaveHint ? (
+        <div
+          className={cn(
+            "mt-0.5 text-[10px]",
+            onLeaveNow
+              ? "font-semibold text-[#FCA5A5]"
+              : nextWeek
+                ? "font-semibold text-[#FDBA74]"
+                : "text-[#FBBF24]"
+          )}
+        >
+          {leaveHint}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -132,7 +202,8 @@ export default function TeamsPage() {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskSize, setNewTaskSize] = useState("4");
-
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   async function load() {
     setLoading(true);
     setError("");
@@ -313,7 +384,26 @@ export default function TeamsPage() {
   function removeTask(taskId: string) {
     const next = { ...board, tasks: board.tasks.filter((task) => task.id !== taskId) };
     setBoard(next);
+    if (editingTaskId === taskId) {
+      setEditingTaskId(null);
+      setEditingTitle("");
+    }
     void persist(next);
+  }
+
+  function startEditTitle(task: Task) {
+    setEditingTaskId(task.id);
+    setEditingTitle(task.title);
+  }
+
+  function commitEditTitle(taskId: string) {
+    const title = editingTitle.trim();
+    setEditingTaskId(null);
+    setEditingTitle("");
+    if (!title) return;
+    const current = board.tasks.find((task) => task.id === taskId);
+    if (!current || current.title === title) return;
+    patchTask(taskId, { title });
   }
 
   function togglePosition(pos: string) {
@@ -442,10 +532,10 @@ export default function TeamsPage() {
       )}
 
       {!needUpload && (
-        <div className="flex gap-3 overflow-x-auto pb-4">
+        <div className="flex flex-col gap-3 pb-4 md:flex-row md:items-start">
           <div
             className={cn(
-              "w-72 shrink-0 rounded-md border bg-[#0C0C0E] p-3",
+              "w-full shrink-0 rounded-md border bg-[#0C0C0E] p-3 md:sticky md:top-4 md:w-72",
               dragOver === "pool" ? "border-[#2DD4BF]" : "border-[#27272A]"
             )}
             onDragOver={(e) => {
@@ -460,7 +550,6 @@ export default function TeamsPage() {
               <span className="text-xs text-[#71717A]">{pool.length}</span>
             </div>
             <p className="mb-2 text-[11px] text-[#71717A]">{t("poolHint")}</p>
-
             {poolLeads.length > 0 && (
               <>
                 <p className="mb-1 text-[10px] uppercase tracking-wide text-[#F59E0B]">{t("leads")}</p>
@@ -472,6 +561,8 @@ export default function TeamsPage() {
                       dragging={draggingId === person.id}
                       selected={selectedPersonId === person.id}
                       leaveLabel={t("leaveSoon")}
+                      nowLeaveLabel={t("leaveNow")}
+                      nextWeekLeaveLabel={t("leaveNextWeek")}
                       onDragStart={setDraggingId}
                       onSelect={toggleSelectPerson}
                     />
@@ -489,6 +580,8 @@ export default function TeamsPage() {
                   dragging={draggingId === person.id}
                   selected={selectedPersonId === person.id}
                   leaveLabel={t("leaveSoon")}
+                  nowLeaveLabel={t("leaveNow")}
+                  nextWeekLeaveLabel={t("leaveNextWeek")}
                   onDragStart={setDraggingId}
                   onSelect={toggleSelectPerson}
                 />
@@ -497,8 +590,9 @@ export default function TeamsPage() {
             </div>
           </div>
 
+          <div className="grid min-w-0 flex-1 grid-cols-1 items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {!board.tasks.length && !loading && (
-            <div className="flex w-80 shrink-0 flex-col justify-center rounded-md border border-dashed border-[#3F3F46] bg-[#0C0C0E]/60 p-4 text-sm text-[#A1A1AA]">
+            <div className="flex flex-col justify-center rounded-md border border-dashed border-[#3F3F46] bg-[#0C0C0E]/60 p-4 text-sm text-[#A1A1AA]">
               <p className="font-medium text-[#E4E4E7]">{t("noTasks")}</p>
               <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-[#A1A1AA]">
                 <li>{t("stepAddTask")}</li>
@@ -525,7 +619,7 @@ export default function TeamsPage() {
                 <div
                   key={task.id}
                   className={cn(
-                    "w-80 shrink-0 rounded-md border bg-[#0C0C0E] p-3",
+                    "min-w-0 rounded-md border bg-[#0C0C0E] p-2.5",
                     dragOver === task.id || dragOver?.startsWith(`${task.id}:`)
                       ? "border-[#2DD4BF]"
                       : "border-[#27272A]",
@@ -542,22 +636,43 @@ export default function TeamsPage() {
                     assignToTask(selectedPersonId, task.id, "auto");
                   }}
                 >
-                  <div className="mb-2 flex items-start gap-2">
-                    <Input
-                      value={task.title}
-                      onChange={(e) => {
-                        const title = e.target.value;
-                        setBoard({
-                          ...board,
-                          tasks: board.tasks.map((item) =>
-                            item.id === task.id ? { ...item, title } : item
-                          ),
-                        });
-                      }}
-                      onBlur={() => void persist(board)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="h-8 flex-1"
-                    />
+                  <div className="mb-1.5 flex items-start gap-2">
+                    {editingTaskId === task.id ? (
+                      <Input
+                        autoFocus
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onBlur={() => commitEditTitle(task.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitEditTitle(task.id);
+                          } else if (e.key === "Escape") {
+                            setEditingTaskId(null);
+                            setEditingTitle("");
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-8 min-w-0 flex-1"
+                      />
+                    ) : (
+                      <div className="flex min-w-0 flex-1 items-start gap-1">
+                        <h3 className="min-w-0 flex-1 break-words text-sm font-semibold leading-snug text-[#FAFAFA]">
+                          {task.title}
+                        </h3>
+                        <button
+                          type="button"
+                          className="mt-0.5 shrink-0 text-[#71717A] hover:text-[#E4E4E7]"
+                          title={t("renameTask")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditTitle(task);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                     <Input
                       type="number"
                       min={0}
@@ -593,7 +708,7 @@ export default function TeamsPage() {
 
                   <p
                     className={cn(
-                      "mb-2 text-xs",
+                      "mb-1.5 text-xs",
                       sizeOver && "text-[#F87171]",
                       sizeUnder && "text-[#FBBF24]",
                       sizeOk && "text-[#5EEAD4]",
@@ -627,7 +742,7 @@ export default function TeamsPage() {
                   <p className="mb-1 text-[10px] uppercase tracking-wide text-[#F59E0B]">{t("leadSlot")}</p>
                   <div
                     className={cn(
-                      "mb-3 min-h-[3rem] rounded-md border border-dashed p-1.5",
+                      "mb-2 min-h-[2.25rem] rounded-md border border-dashed p-1",
                       dragOver === `${task.id}:lead` ? "border-[#F59E0B]" : "border-[#3F3F46]"
                     )}
                     onDragOver={(e) => {
@@ -648,11 +763,13 @@ export default function TeamsPage() {
                         dragging={draggingId === lead.id}
                         selected={selectedPersonId === lead.id}
                         leaveLabel={t("leaveSoon")}
+                        nowLeaveLabel={t("leaveNow")}
+                        nextWeekLeaveLabel={t("leaveNextWeek")}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
                     ) : (
-                      <p className="px-1 py-2 text-xs text-[#52525B]">{t("dropLead")}</p>
+                      <p className="px-1 py-1 text-xs text-[#52525B]">{t("dropLead")}</p>
                     )}
                   </div>
 
@@ -661,7 +778,7 @@ export default function TeamsPage() {
                   </p>
                   <div
                     className={cn(
-                      "flex min-h-[4rem] flex-col gap-2 rounded-md border border-dashed p-1.5",
+                      "flex max-h-72 min-h-[2.25rem] flex-col gap-1.5 overflow-y-auto rounded-md border border-dashed p-1",
                       dragOver === `${task.id}:worker` ? "border-[#2DD4BF]" : "border-[#3F3F46]"
                     )}
                     onDragOver={(e) => {
@@ -683,17 +800,20 @@ export default function TeamsPage() {
                         dragging={draggingId === person.id}
                         selected={selectedPersonId === person.id}
                         leaveLabel={t("leaveSoon")}
+                        nowLeaveLabel={t("leaveNow")}
+                        nextWeekLeaveLabel={t("leaveNextWeek")}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
                     ))}
                     {!workers.length && (
-                      <p className="px-1 py-2 text-xs text-[#52525B]">{t("dropWorkers")}</p>
+                      <p className="px-1 py-1 text-xs text-[#52525B]">{t("dropWorkers")}</p>
                     )}
                   </div>
                 </div>
               );
             })}
+          </div>
         </div>
       )}
     </div>

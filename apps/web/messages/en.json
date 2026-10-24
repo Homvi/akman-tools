@@ -270,8 +270,10 @@
     "stepAddTask": "Enter the task name and size, then Task.",
     "stepAssignLead": "Drop a group lead into the lead slot.",
     "stepAssignWorkers": "Drop cable pullers / electricians into workers.",
-    "leaveSoon": "leave"
-  },
+    "leaveSoon": "leave",
+    "leaveNow": "On leave",
+    "leaveNextWeek": "Leave next week",
+    "renameTask": "Rename task"  },
   "routes": {
     "title": "Routes",
     "subtitle": "Route preview."

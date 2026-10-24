@@ -270,8 +270,10 @@
     "stepAddTask": "Taskname und Köpfe eingeben, dann Task.",
     "stepAssignLead": "Gruppenleiter in den Lead-Slot ziehen.",
     "stepAssignWorkers": "Kabelzieher / Elektriker zu den Arbeitern ziehen.",
-    "leaveSoon": "Urlaub"
-  },
+    "leaveSoon": "Urlaub",
+    "leaveNow": "Im Urlaub",
+    "leaveNextWeek": "Urlaub nächste Woche",
+    "renameTask": "Task umbenennen"  },
   "routes": {
     "title": "Trassen",
     "subtitle": "Trassenvorschau."

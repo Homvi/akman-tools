@@ -270,8 +270,10 @@
     "stepAddTask": "Írd be a task nevét és a főszámot, majd Task.",
     "stepAssignLead": "Húzz egy csoportvezetőt a lead slotba.",
     "stepAssignWorkers": "Húzd a kábelhúzókat / villanyszerelőket a dolgozókhoz.",
-    "leaveSoon": "szabadság"
-  },
+    "leaveSoon": "szabadság",
+    "leaveNow": "Most szabin",
+    "leaveNextWeek": "Jövő héten szabi",
+    "renameTask": "Task átnevezése"  },
   "routes": {
     "title": "Nyomvonalak",
     "subtitle": "Nyomvonal-előnézet."
