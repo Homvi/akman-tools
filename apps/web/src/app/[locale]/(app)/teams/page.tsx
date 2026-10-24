@@ -3,57 +3,35 @@
 import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/routing";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TopProgress } from "@/components/progress-bar";
+import { DateRangePicker } from "@/components/date-range-picker";
 import { cn } from "@/lib/utils";
+import {
+  formatShortRange,
+  leaveOverlapsNextWeek,
+  newId,
+  normalizeTask,
+  personLeaveRanges,
+  taskLeaveConflict,
+  taskMembers,
+  type Board,
+  type LeaveRange,
+  type Person,
+  type Task,
+} from "@/lib/staffing";
 
-type Person = {
-  id: string;
-  name: string;
-  position: string;
-  is_lead: boolean;
-  available?: boolean;
-  on_leave?: boolean;
-  leave_start?: string | null;
-  leave_end?: string | null;
-  last_present?: string | null;
-};
+type StatusFilter = "all" | "available" | "leaveNow" | "leaveNextWeek";
 
-type Task = {
-  id: string;
-  title: string;
-  size: number;
-  lead_id: string | null;
-  worker_ids: string[];
-  blocker: boolean;
-  done: boolean;
-  order: number;
-};
-
-type Board = {
-  tasks: Task[];
-  updated_at?: string | null;
-};
-
-function newId(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function normalizeTask(task: Partial<Task> & { title: string }): Task {
-  return {
-    id: task.id || newId("task"),
-    title: task.title,
-    size: typeof task.size === "number" && task.size > 0 ? task.size : Number(task.size) || 0,
-    lead_id: task.lead_id || null,
-    worker_ids: Array.isArray(task.worker_ids) ? task.worker_ids.filter(Boolean) : [],
-    blocker: Boolean(task.blocker),
-    done: Boolean(task.done),
-    order: typeof task.order === "number" ? task.order : 0,
-  };
-}
+const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
+  { key: "all", label: "statusAll" },
+  { key: "available", label: "statusAvailable" },
+  { key: "leaveNow", label: "statusLeaveNow" },
+  { key: "leaveNextWeek", label: "statusLeaveNextWeek" },
+];
 
 function parseSize(raw: string): number {
   const n = Number.parseInt(raw, 10);
@@ -61,41 +39,9 @@ function parseSize(raw: string): number {
   return Math.min(n, 999);
 }
 
-function parseIsoDate(value: string | null | undefined): Date | null {
-  if (!value) return null;
-  const d = new Date(`${value}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** Next calendar week Mon–Sun relative to `today`. */
-function nextWeekRange(today = new Date()): { start: Date; end: Date } {
-  const base = new Date(today);
-  base.setHours(12, 0, 0, 0);
-  const dow = base.getDay(); // 0=Sun … 6=Sat
-  const daysUntilNextMon = dow === 0 ? 1 : 8 - dow;
-  const start = new Date(base);
-  start.setDate(base.getDate() + daysUntilNextMon);
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  return { start, end };
-}
-
-function leaveOverlapsNextWeek(person: Person, today = new Date()): boolean {
-  const leaveStart = parseIsoDate(person.leave_start);
-  if (!leaveStart) return false;
-  const leaveEnd = parseIsoDate(person.leave_end) || leaveStart;
-  const { start, end } = nextWeekRange(today);
-  return leaveStart <= end && leaveEnd >= start;
-}
-
 function formatLeaveHint(person: Person, leaveLabel: string): string | null {
-  if (!person.leave_start) return null;
-  const start = person.leave_start.slice(5).replace("-", ".");
-  if (person.leave_end && person.leave_end !== person.leave_start) {
-    const end = person.leave_end.slice(5).replace("-", ".");
-    return `${leaveLabel} ${start}–${end}`;
-  }
-  return `${leaveLabel} ${start}`;
+  const first = personLeaveRanges(person)[0];
+  return first ? `${leaveLabel} ${formatShortRange(first)}` : null;
 }
 
 function normalizeSearch(value: string) {
@@ -113,6 +59,7 @@ function PersonChip({
   leaveLabel,
   nowLeaveLabel,
   nextWeekLeaveLabel,
+  conflictText,
   onDragStart,
   onSelect,
 }: {
@@ -122,6 +69,8 @@ function PersonChip({
   leaveLabel: string;
   nowLeaveLabel: string;
   nextWeekLeaveLabel: string;
+  /** Set when this person's leave overlaps the task they sit on. */
+  conflictText?: string | null;
   onDragStart: (id: string) => void;
   onSelect?: (id: string) => void;
 }) {
@@ -143,7 +92,9 @@ function PersonChip({
           ? "border-[#F59E0B]/50 bg-[#F59E0B]/15 text-[#FCD34D]"
           : "border-[#27272A] bg-[#18181B] text-[#E4E4E7]",
         nextWeek && !onLeaveNow && "border-[#F97316] bg-[#F97316]/15 ring-1 ring-[#F97316]/70",
-        onLeaveNow && "border-[#EF4444] bg-[#EF4444]/15 ring-1 ring-[#EF4444]/70",
+        onLeaveNow && "border-[#3F3F46] bg-[#18181B] text-[#A1A1AA] grayscale",
+        onLeaveNow && !conflictText && "opacity-50",
+        conflictText && "border-[#EF4444] ring-2 ring-[#EF4444]",
         selected && "ring-2 ring-[#2DD4BF]",
         dragging && "opacity-50"
       )}
@@ -152,6 +103,7 @@ function PersonChip({
         leaveHint,
         onLeaveNow ? nowLeaveLabel : null,
         nextWeek ? nextWeekLeaveLabel : null,
+        conflictText,
       ]
         .filter(Boolean)
         .join(" · ") || undefined}
@@ -161,7 +113,7 @@ function PersonChip({
         {onLeaveNow || nextWeek ? (
           <div className="flex shrink-0 flex-col items-end gap-0.5">
             {onLeaveNow ? (
-              <span className="rounded bg-[#EF4444] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+              <span className="rounded bg-[#52525B] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#E4E4E7]">
                 {nowLeaveLabel}
               </span>
             ) : null}
@@ -176,15 +128,16 @@ function PersonChip({
       {person.position ? (
         <div className="mt-0.5 text-[11px] text-[#A1A1AA]">{person.position}</div>
       ) : null}
-      {leaveHint ? (
+      {conflictText ? (
+        <div className="mt-1 inline-flex items-center gap-1 rounded bg-[#EF4444] px-1.5 py-0.5 text-[10px] font-bold text-white">
+          <AlertTriangle className="h-3 w-3" />
+          {conflictText}
+        </div>
+      ) : leaveHint ? (
         <div
           className={cn(
             "mt-0.5 text-[10px]",
-            onLeaveNow
-              ? "font-semibold text-[#FCA5A5]"
-              : nextWeek
-                ? "font-semibold text-[#FDBA74]"
-                : "text-[#FBBF24]"
+            onLeaveNow ? "text-[#A1A1AA]" : nextWeek ? "font-semibold text-[#FDBA74]" : "text-[#FBBF24]"
           )}
         >
           {leaveHint}
@@ -210,9 +163,15 @@ export default function TeamsPage() {
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [newTaskSize, setNewTaskSize] = useState("4");
+  const [newTaskRange, setNewTaskRange] = useState<{ start: string | null; end: string | null }>({
+    start: null,
+    end: null,
+  });
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [personSearch, setPersonSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
 
   async function load() {
     setLoading(true);
@@ -286,16 +245,25 @@ export default function TeamsPage() {
     return ids;
   }, [board.tasks]);
 
+  function matchesStatus(person: Person): boolean {
+    if (statusFilter === "available") return !person.on_leave;
+    if (statusFilter === "leaveNow") return Boolean(person.on_leave);
+    if (statusFilter === "leaveNextWeek") return leaveOverlapsNextWeek(person);
+    return true;
+  }
+
   const searchNeedle = normalizeSearch(personSearch);
   const pool = filteredPeople.filter(
     (p) =>
       !assignedIds.has(p.id) &&
+      matchesStatus(p) &&
       (!searchNeedle ||
         normalizeSearch(p.name).includes(searchNeedle) ||
         normalizeSearch(p.position || "").includes(searchNeedle))
   );
   const poolLeads = pool.filter((p) => p.is_lead);
   const poolWorkers = pool.filter((p) => !p.is_lead);
+  const selectedPerson = selectedPersonId ? peopleById.get(selectedPersonId) : undefined;
 
   function taskHeadcount(task: Task) {
     return (task.lead_id ? 1 : 0) + task.worker_ids.length;
@@ -381,10 +349,13 @@ export default function TeamsPage() {
       worker_ids: [],
       blocker: false,
       done: false,
+      start_date: newTaskRange.start,
+      end_date: newTaskRange.end,
       order: board.tasks.length,
     });
     const next = { ...board, tasks: [...board.tasks, task] };
     setNewTaskTitle("");
+    setNewTaskRange({ start: null, end: null });
     setBoard(next);
     void persist(next);
   }
@@ -423,6 +394,18 @@ export default function TeamsPage() {
     patchTask(taskId, { title });
   }
 
+  function commitBlockerNote(task: Task) {
+    const draft = noteDrafts[task.id];
+    if (draft === undefined) return;
+    setNoteDrafts((prev) => {
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
+    const note = draft.trim();
+    if (note !== task.blocker_note) patchTask(task.id, { blocker_note: note });
+  }
+
   function togglePosition(pos: string) {
     setSelectedPositions((prev) =>
       prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]
@@ -431,6 +414,10 @@ export default function TeamsPage() {
 
   function toggleSelectPerson(personId: string) {
     setSelectedPersonId((prev) => (prev === personId ? null : personId));
+  }
+
+  function conflictLabel(range: LeaveRange | null): string | null {
+    return range ? t("conflictLeave", { range: formatShortRange(range) }) : null;
   }
 
   return (
@@ -538,6 +525,12 @@ export default function TeamsPage() {
               className="h-9 w-20"
             />
           </div>
+          <DateRangePicker
+            start={newTaskRange.start}
+            end={newTaskRange.end}
+            onChange={(start, end) => setNewTaskRange({ start, end })}
+            className="h-9"
+          />
           <Button type="submit" disabled={!newTaskTitle.trim() || saving}>
             <Plus className="mr-1 h-4 w-4" />
             {t("addTask")}
@@ -567,7 +560,7 @@ export default function TeamsPage() {
               <span className="text-xs text-[#71717A]">{pool.length}</span>
             </div>
             <p className="mb-2 text-[11px] text-[#71717A]">{t("poolHint")}</p>
-            <div className="relative mb-3">
+            <div className="relative mb-2">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#71717A]" />
               <Input
                 type="search"
@@ -577,7 +570,30 @@ export default function TeamsPage() {
                 className="h-8 pl-7 text-sm"
               />
             </div>
-            {searchNeedle && pool.length === 0 && (
+            <div className="mb-3 flex flex-wrap gap-1" role="radiogroup" aria-label={t("filterStatus")}>
+              {STATUS_FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="radio"
+                  aria-checked={statusFilter === item.key}
+                  onClick={() => setStatusFilter(item.key)}
+                  className={cn(
+                    "rounded-md border px-2 py-0.5 text-[11px]",
+                    statusFilter === item.key
+                      ? item.key === "leaveNextWeek"
+                        ? "border-[#F97316] bg-[#F97316]/20 text-[#FDBA74]"
+                        : item.key === "leaveNow"
+                          ? "border-[#71717A] bg-[#3F3F46] text-[#E4E4E7]"
+                          : "border-[#2DD4BF]/60 bg-[#2DD4BF]/15 text-[#5EEAD4]"
+                      : "border-[#27272A] text-[#71717A] hover:text-[#A1A1AA]"
+                  )}
+                >
+                  {t(item.label)}
+                </button>
+              ))}
+            </div>
+            {(searchNeedle || statusFilter !== "all") && pool.length === 0 && (
               <p className="mb-2 text-xs text-[#71717A]">{t("noSearchResults")}</p>
             )}
 
@@ -617,7 +633,9 @@ export default function TeamsPage() {
                   onSelect={toggleSelectPerson}
                 />
               ))}
-              {!pool.length && <p className="text-xs text-[#52525B]">{t("poolEmpty")}</p>}
+              {!pool.length && !searchNeedle && statusFilter === "all" && (
+                <p className="text-xs text-[#52525B]">{t("poolEmpty")}</p>
+              )}
             </div>
           </div>
 
@@ -641,11 +659,19 @@ export default function TeamsPage() {
               const workers = task.worker_ids
                 .map((id) => peopleById.get(id))
                 .filter((p): p is Person => Boolean(p));
+              const members = taskMembers(task, peopleById);
+              const conflictCount = members.filter((p) => taskLeaveConflict(p, task)).length;
+              const memberLeave = members.flatMap((p) => personLeaveRanges(p));
+              const selectedConflict =
+                selectedPerson && !task.done ? taskLeaveConflict(selectedPerson, task) : null;
               const filled = taskHeadcount(task);
               const target = task.size > 0 ? task.size : 0;
               const sizeOver = target > 0 && filled > target;
               const sizeUnder = target > 0 && filled < target;
               const sizeOk = target > 0 && filled === target;
+              const blockedOpen = task.blocker && !task.done;
+              const noteValue = noteDrafts[task.id] ?? task.blocker_note;
+              const noteMissing = task.blocker && !noteValue.trim();
               return (
                 <div
                   key={task.id}
@@ -654,8 +680,18 @@ export default function TeamsPage() {
                     dragOver === task.id || dragOver?.startsWith(`${task.id}:`)
                       ? "border-[#2DD4BF]"
                       : "border-[#27272A]",
-                    task.blocker && !task.done && "border-[#EF4444]/50"
+                    blockedOpen && "border-[#EF4444]/60",
+                    task.done && "opacity-70",
+                    selectedConflict && "outline-dashed outline-2 outline-offset-2 outline-[#EF4444]"
                   )}
+                  title={
+                    selectedConflict && selectedPerson
+                      ? t("selectedConflict", {
+                          name: selectedPerson.name,
+                          range: formatShortRange(selectedConflict),
+                        })
+                      : undefined
+                  }
                   onDragOver={(e) => {
                     e.preventDefault();
                     setDragOver(task.id);
@@ -737,6 +773,32 @@ export default function TeamsPage() {
                     </Button>
                   </div>
 
+                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                    <DateRangePicker
+                      start={task.start_date}
+                      end={task.end_date}
+                      onChange={(start_date, end_date) => patchTask(task.id, { start_date, end_date })}
+                      leaveRanges={memberLeave}
+                      className="max-w-full"
+                    />
+                    {conflictCount > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded bg-[#EF4444] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        <AlertTriangle className="h-3 w-3" />
+                        {t("conflictsCount", { count: conflictCount })}
+                      </span>
+                    )}
+                    {blockedOpen && (
+                      <span className="rounded bg-[#EF4444]/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#FCA5A5]">
+                        {t("blocked")}
+                      </span>
+                    )}
+                    {task.done && (
+                      <span className="rounded bg-[#3F3F46] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#E4E4E7]">
+                        {t("markDone")}
+                      </span>
+                    )}
+                  </div>
+
                   <p
                     className={cn(
                       "mb-1.5 text-xs",
@@ -750,25 +812,6 @@ export default function TeamsPage() {
                       ? t("headcountProgress", { current: filled, target })
                       : t("peopleCount", { count: filled })}
                   </p>
-
-                  <div className="mb-2 flex items-center gap-3 text-[10px] text-[#A1A1AA]">
-                    <label className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={task.done}
-                        onChange={(e) => patchTask(task.id, { done: e.target.checked })}
-                      />
-                      {t("markDone")}
-                    </label>
-                    <label className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={task.blocker}
-                        onChange={(e) => patchTask(task.id, { blocker: e.target.checked })}
-                      />
-                      {t("blocker")}
-                    </label>
-                  </div>
 
                   <p className="mb-1 text-[10px] uppercase tracking-wide text-[#F59E0B]">{t("leadSlot")}</p>
                   <div
@@ -796,6 +839,7 @@ export default function TeamsPage() {
                         leaveLabel={t("leaveSoon")}
                         nowLeaveLabel={t("leaveNow")}
                         nextWeekLeaveLabel={t("leaveNextWeek")}
+                        conflictText={conflictLabel(taskLeaveConflict(lead, task))}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
@@ -833,12 +877,76 @@ export default function TeamsPage() {
                         leaveLabel={t("leaveSoon")}
                         nowLeaveLabel={t("leaveNow")}
                         nextWeekLeaveLabel={t("leaveNextWeek")}
+                        conflictText={conflictLabel(taskLeaveConflict(person, task))}
                         onDragStart={setDraggingId}
                         onSelect={toggleSelectPerson}
                       />
                     ))}
                     {!workers.length && (
                       <p className="px-1 py-1 text-xs text-[#52525B]">{t("dropWorkers")}</p>
+                    )}
+                  </div>
+
+                  <div
+                    className="mt-2 border-t border-[#27272A] pt-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center gap-4 text-xs text-[#A1A1AA]">
+                      <label className="inline-flex cursor-pointer items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[#2DD4BF]"
+                          checked={task.done}
+                          onChange={(e) => patchTask(task.id, { done: e.target.checked })}
+                        />
+                        {t("markDone")}
+                      </label>
+                      <label
+                        className={cn(
+                          "inline-flex cursor-pointer items-center gap-1.5",
+                          task.blocker && "text-[#FCA5A5]"
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 accent-[#EF4444]"
+                          checked={task.blocker}
+                          onChange={(e) => patchTask(task.id, { blocker: e.target.checked })}
+                        />
+                        {t("blocker")}
+                      </label>
+                    </div>
+                    {task.blocker && (
+                      <div className="mt-2">
+                        <label
+                          className="mb-1 block text-[10px] uppercase tracking-wide text-[#FCA5A5]"
+                          htmlFor={`blocker-${task.id}`}
+                        >
+                          {t("blockerNoteLabel")} *
+                        </label>
+                        <textarea
+                          id={`blocker-${task.id}`}
+                          required
+                          rows={2}
+                          value={noteValue}
+                          autoFocus={!task.blocker_note}
+                          onChange={(e) =>
+                            setNoteDrafts((prev) => ({ ...prev, [task.id]: e.target.value }))
+                          }
+                          onBlur={() => commitBlockerNote(task)}
+                          placeholder={t("blockerNotePlaceholder")}
+                          maxLength={500}
+                          className={cn(
+                            "w-full resize-y rounded-md border bg-[#18181B] px-2 py-1.5 text-sm text-[#FAFAFA] placeholder:text-[#52525B] focus:outline-none focus:ring-1",
+                            noteMissing
+                              ? "border-[#EF4444] focus:ring-[#EF4444]"
+                              : "border-[#3F3F46] focus:ring-[#2DD4BF]"
+                          )}
+                        />
+                        {noteMissing && (
+                          <p className="mt-0.5 text-[11px] text-[#F87171]">{t("blockerRequired")}</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
