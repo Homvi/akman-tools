@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TopProgress } from "@/components/progress-bar";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { NotificationBell } from "@/components/notification-bell";
 
 const NAV_KEYS = [
   { href: "/dashboard", key: "dashboard" as const },
@@ -70,7 +71,10 @@ export function AppShell({
       <div className="mx-auto flex min-h-screen max-w-[1400px]">
         <aside className="hidden w-56 shrink-0 border-r border-[#27272A] bg-[#0C0C0E] p-4 md:block">
           <div className="mb-6">
-            <div className="text-lg font-semibold tracking-tight text-[#FAFAFA]">{t("brand")}</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-lg font-semibold tracking-tight text-[#FAFAFA]">{t("brand")}</div>
+              <NotificationBell />
+            </div>
             <p className="mt-1 text-xs text-[#71717A]">
               {status?.loaded && status.progressAsOf ? (
                 <span className="text-[#2DD4BF]">{status.progressAsOf}</span>
@@ -105,6 +109,7 @@ export function AppShell({
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <NotificationBell align="right" />
               <LanguageSwitcher />
               <button type="button" onClick={() => setOpen((v) => !v)} aria-label={t("menu")} className="text-[#FAFAFA]">
                 {open ? <X size={20} /> : <Menu size={20} />}
