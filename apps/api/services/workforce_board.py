@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from apps.api.config import settings
+from src.staffing_categories import normalize_requirements
 
 _WF_PATH = "workforce.parquet"
 _BOARD_PATH = "workforce_board.json"
@@ -494,11 +495,13 @@ def normalize_board(payload: dict[str, Any] | None) -> dict[str, Any]:
             worker_ids.append(pid)
 
         start_date, end_date = _parse_date_range(item)
+        requirements = normalize_requirements(item.get("requirements"))
         tasks.append(
             {
                 "id": task_id,
                 "title": title,
-                "size": _parse_size(item.get("size")),
+                "size": sum(requirements.values()) if requirements else _parse_size(item.get("size")),
+                "requirements": requirements,
                 "lead_id": lead_id,
                 "worker_ids": worker_ids,
                 "blocker": bool(item.get("blocker")),

@@ -163,6 +163,41 @@ def test_normalize_task_dates_and_blocker_note(tmp_path, monkeypatch):
     assert second["end_date"] is None
 
 
+def test_requirements_normalized_and_drive_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(board_svc, "board_path", lambda: tmp_path / "workforce_board.json")
+    saved = board_svc.save_board(
+        {
+            "tasks": [
+                {"title": "Req", "size": 9, "requirements": {"cable_puller": 2, "long_distance_lead": "1", "x": 4}},
+                {"title": "Legacy", "size": 3},
+            ]
+        }
+    )
+    req, legacy = saved["tasks"]
+    assert req["requirements"] == {"cable_puller": 2, "long_distance_lead": 1}
+    assert req["size"] == 3
+    assert legacy["requirements"] == {}
+    assert legacy["size"] == 3
+
+
+def test_leave_missing_means_no_current_or_future_leave():
+    from datetime import date
+
+    rows = [
+        {"Date": "2026-10-20", "Name": n, "Position": "Cable puller", "Present": True, "Status": "work"}
+        for n in ("Past", "Future", "Now")
+    ]
+    rows += [
+        {"Date": "2026-10-05", "Name": "Past", "Position": "Cable puller", "Present": False, "Status": "leave"},
+        {"Date": "2026-11-10", "Name": "Future", "Position": "Cable puller", "Present": False, "Status": "leave"},
+        {"Date": "2026-10-23", "Name": "Now", "Position": "Cable puller", "Present": False, "Status": "leave"},
+        {"Date": "2026-10-26", "Name": "Now", "Position": "Cable puller", "Present": False, "Status": "leave"},
+    ]
+    people = board_svc.list_people(pd.DataFrame(rows), as_of=date(2026, 10, 23))
+    missing = {p["name"] for p in people if not p["leave_ranges"]}
+    assert missing == {"Past"}
+
+
 def test_list_people_leave_ranges_bridge_weekends():
     from datetime import date
 
